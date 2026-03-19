@@ -210,7 +210,29 @@ const MATERIALS = {
     iceCrystal:     { id: 'iceCrystal',     name: 'Ice Crystal',     color: '#aaeeff', description: '氷の結晶' },
     drakeHeadScale: { id: 'drakeHeadScale', name: 'Drake Head Scale', color: '#55aa77', description: '頭部の鱗' },
     drakeTail:      { id: 'drakeTail',      name: 'Drake Tail',      color: '#aa7744', description: 'ドレイクの尻尾' },
+    elderScale:     { id: 'elderScale',     name: 'Elder Scale',     color: '#aa44ff', description: '古龍の鱗' },
 };
+
+// アップグレード定義（武器ID→レベル別コスト）
+const UPGRADE_COSTS = {
+    // +1: 同素材x2, +2: 同素材x4+Core x1, +3: 同素材x6+Core x2
+    ironSword:    { mat: 'drakeScale', costs: [{m:2,c:0},{m:4,c:1},{m:6,c:2}] },
+    hunterBow:    { mat: 'drakeFang',  costs: [{m:2,c:0},{m:4,c:1},{m:6,c:2}] },
+    frostBlade:   { mat: 'iceFang',    costs: [{m:2,c:0},{m:4,c:1},{m:6,c:2}] },
+    warHammer:    { mat: 'drakeScale', costs: [{m:2,c:0},{m:4,c:1},{m:6,c:2}] },
+    poisonDagger: { mat: 'drakeFang',  costs: [{m:2,c:0},{m:4,c:1},{m:6,c:2}] },
+    drakeArmor:   { mat: 'drakeScale', costs: [{m:2,c:0},{m:4,c:1},{m:6,c:2}] },
+};
+const UPGRADE_DMG_MULT = [1.0, 1.1, 1.25, 1.5];
+const ARMOR_UPGRADE_MULT = [0.7, 0.6, 0.5, 0.4];
+
+// サブクエスト条件
+const SUB_QUESTS = [
+    { id: 'noDamage',   name: 'スタイリッシュ', desc: '被ダメージ0で討伐', rewardType: 'expMult', rewardVal: 2 },
+    { id: 'speedRun',   name: 'スピードラン',   desc: '60秒以内に討伐',    rewardType: 'matMult', rewardVal: 2 },
+    { id: 'partBreak',  name: '部位破壊',       desc: '頭と尻尾を両方破壊', rewardType: 'specialDrop', rewardVal: 1 },
+    { id: 'parryMaster',name: 'パリィマスター', desc: '3回以上パリィ成功', rewardType: 'coreDrop', rewardVal: 1 },
+];
 
 // EXP・レベルアップ定数
 const EXP_TABLE = [0, 200, 500, 1000, 2000]; // Lv1→2, 2→3, ...
@@ -306,6 +328,35 @@ const QUESTS = [
                       aggroRange: 350, dropTableId: 'giantDrake', isBoss: true },
         }],
     },
+    {
+        id: 'elderDrake', name: '古龍討伐', special: true,
+        description: '最強の古龍を討伐せよ', difficulty: 4,
+        rewards: [{ materialId: 'elderScale', count: 5 }],
+        unlockCondition: 'allClear+lv5',
+        monsters: [{
+            name: 'Elder Drake', x: 400 - 48, y: 180,
+            config: { hp: 3000, width: 96, height: 96, speed: 100, color: '#220022',
+                      attackDamage: 25, attackRange: 75, attackCooldown: 800,
+                      aggroRange: 450, dropTableId: 'giantDrake', isBoss: true, isElder: true },
+        }],
+    },
+    {
+        id: 'abyss', name: '奈落の試練', special: true,
+        description: 'Elder Drake + Giant Drake同時', difficulty: 4,
+        unlockCondition: 'elderClear',
+        rewards: [{ materialId: 'elderScale', count: 8 }],
+        timeLimit: 600,
+        monsters: [
+            { name: 'Elder Drake', x: 300, y: 180,
+              config: { hp: 3000, width: 96, height: 96, speed: 100, color: '#220022',
+                        attackDamage: 25, attackRange: 75, attackCooldown: 800,
+                        aggroRange: 450, dropTableId: 'giantDrake', isBoss: true, isElder: true } },
+            { name: 'Giant Drake', x: 500, y: 250,
+              config: { hp: 1500, width: 96, height: 96, speed: 70, color: '#882222',
+                        attackDamage: 13, attackRange: 70, attackCooldown: 1000,
+                        aggroRange: 350, dropTableId: 'giantDrake', isBoss: true } },
+        ],
+    },
 ];
 
 class Weapon {
@@ -323,7 +374,11 @@ class Weapon {
         this.name = name; this.damage = damage; this.range = range;
         this.cooldown = cooldown; this.knockback = knockback;
         this.type = type; this.style = style; this.desc = desc;
+        this.upgradeLevel = 0; // 0〜3
+        this.baseDamage = damage;
     }
+    getEffectiveDamage() { return Math.floor(this.baseDamage * UPGRADE_DMG_MULT[this.upgradeLevel]); }
+    getDisplayName() { return this.upgradeLevel > 0 ? `${this.name}+${this.upgradeLevel}` : this.name; }
 }
 const WEAPONS = {
     basicSword:  new Weapon('Basic Sword',  15, 45, 350, 3, 'melee', 'combo3', '3段コンボ'),
@@ -337,7 +392,9 @@ const WEAPONS = {
 class Armor {
     constructor(name, defense, damageMultiplier = 1.0) {
         this.name = name; this.defense = defense; this.damageMultiplier = damageMultiplier;
+        this.upgradeLevel = 0;
     }
+    getDisplayName() { return this.upgradeLevel > 0 ? `${this.name}+${this.upgradeLevel}` : this.name; }
 }
 const ARMORS = { drakeArmor: new Armor('Drake Armor', 20, 0.7) };
 
@@ -451,7 +508,12 @@ class Arrow {
 }
 
 class Inventory {
-    constructor() { this.materials = {}; this.weapons = [WEAPONS.basicSword]; this.armors = []; }
+    constructor() {
+        this.materials = {}; this.weapons = [WEAPONS.basicSword]; this.armors = [];
+        this.clearedQuests = new Set(); // クリア済みクエストID
+        this.bestTimes = {};            // クエストID→ベストタイム(秒)
+        this.title = '';                // 称号
+    }
     addMaterial(id, n) { if (!this.materials[id]) this.materials[id]=0; this.materials[id]+=n; }
     getMaterialCount(id) { return this.materials[id]||0; }
     consumeMaterial(id, n) { if (this.getMaterialCount(id)<n) return false; this.materials[id]-=n; return true; }
@@ -464,9 +526,57 @@ class Inventory {
     craft(r) {
         if (!this.canCraft(r)||this.alreadyOwns(r)) return false;
         for (const m of r.materials) this.consumeMaterial(m.materialId, m.count);
-        if (r.resultType==='weapon') this.weapons.push(WEAPONS[r.resultId]);
-        else if (r.resultType==='armor') this.armors.push(ARMORS[r.resultId]);
+        if (r.resultType==='weapon') {
+            const w = new Weapon(WEAPONS[r.resultId].name, WEAPONS[r.resultId].baseDamage,
+                WEAPONS[r.resultId].range, WEAPONS[r.resultId].cooldown, WEAPONS[r.resultId].knockback,
+                WEAPONS[r.resultId].type, WEAPONS[r.resultId].style, WEAPONS[r.resultId].desc);
+            this.weapons.push(w);
+        }
+        else if (r.resultType==='armor') this.armors.push(new Armor(ARMORS[r.resultId].name, ARMORS[r.resultId].defense, ARMORS[r.resultId].damageMultiplier));
         return true;
+    }
+    /** 武器アップグレード */
+    canUpgrade(weapon) {
+        const id = this.getWeaponId(weapon);
+        if (!id || !UPGRADE_COSTS[id]) return false;
+        if (weapon.upgradeLevel >= 3) return false;
+        const cost = UPGRADE_COSTS[id].costs[weapon.upgradeLevel];
+        const mat = UPGRADE_COSTS[id].mat;
+        return this.getMaterialCount(mat) >= cost.m && this.getMaterialCount('drakeCore') >= cost.c;
+    }
+    upgradeWeapon(weapon) {
+        const id = this.getWeaponId(weapon);
+        if (!this.canUpgrade(weapon)) return false;
+        const cost = UPGRADE_COSTS[id].costs[weapon.upgradeLevel];
+        const mat = UPGRADE_COSTS[id].mat;
+        this.consumeMaterial(mat, cost.m);
+        if (cost.c > 0) this.consumeMaterial('drakeCore', cost.c);
+        weapon.upgradeLevel++;
+        weapon.damage = weapon.getEffectiveDamage();
+        return true;
+    }
+    canUpgradeArmor(armor) {
+        if (!armor || armor.upgradeLevel >= 3) return false;
+        const cost = UPGRADE_COSTS['drakeArmor'];
+        if (!cost) return false;
+        const c = cost.costs[armor.upgradeLevel];
+        return this.getMaterialCount(cost.mat) >= c.m && this.getMaterialCount('drakeCore') >= c.c;
+    }
+    upgradeArmor(armor) {
+        if (!this.canUpgradeArmor(armor)) return false;
+        const cost = UPGRADE_COSTS['drakeArmor'];
+        const c = cost.costs[armor.upgradeLevel];
+        this.consumeMaterial(cost.mat, c.m);
+        if (c.c > 0) this.consumeMaterial('drakeCore', c.c);
+        armor.upgradeLevel = (armor.upgradeLevel || 0) + 1;
+        armor.damageMultiplier = ARMOR_UPGRADE_MULT[armor.upgradeLevel];
+        return true;
+    }
+    getWeaponId(weapon) {
+        for (const [id, w] of Object.entries(WEAPONS)) {
+            if (w.name === weapon.name) return id;
+        }
+        return null;
     }
 }
 
@@ -795,6 +905,10 @@ class Monster {
         this.iceBreathTimer = this.iceBreathCooldown;
         // Giant Drake 第2形態
         this.phase2 = false;
+        // Elder Drake AI
+        this.isElder = config.isElder || false;
+        this.elderSkillTimer = 3000;  // 特殊行動間隔
+        this.elderRage = false;       // 激昂状態
         // 部位破壊（Drake系のみ）
         this.hasParts = !this.isIceWolf;
         const partHp = Math.floor(this.maxHp * 0.3);
@@ -891,6 +1005,42 @@ class Monster {
             if (this.chargeTimer<=0) { this.state='idle'; this.chargeCooldownTimer=this.chargeCooldown; }
             return;
         }
+        // Elder Drake: 激昂チェック
+        if (this.isElder && !this.elderRage && this.hp <= this.maxHp * 0.3) {
+            this.elderRage = true;
+            this.speed = Math.floor(this.baseSpeed * 1.5);
+            this.attackDamage = Math.floor(this.baseAttackDamage * 1.3);
+            this.color = '#440044';
+        }
+        // Elder Drake: 特殊行動
+        if (this.isElder && dist < this.aggroRange && game) {
+            this.elderSkillTimer -= dt * 1000 * (this.elderRage ? 1.5 : 1.0);
+            if (this.elderSkillTimer <= 0) {
+                this.elderSkillTimer = this.elderRage ? 2000 : 3000;
+                const skill = Math.floor(Math.random() * 3);
+                const cx = this.x+this.width/2, cy = this.y+this.height/2;
+                if (skill === 0) {
+                    // 炎ブレス: 前方に範囲ダメージ
+                    const d = dist||1;
+                    const ndx = (player.x+player.width/2-cx)/d, ndy = (player.y+player.height/2-cy)/d;
+                    if (dist < 200) { player.takeDamage(this.elderRage ? 52 : 40); }
+                    for (let i=0;i<10;i++) { const a=Math.atan2(ndy,ndx)+(Math.random()-0.5)*1;
+                        game.particles.push(new Particle(cx,cy,Math.cos(a)*200,Math.sin(a)*200,'#ff6622',400,4)); }
+                } else if (skill === 1) {
+                    // 尻尾薙ぎ: 後方
+                    if (dist < 120) { player.takeDamage(this.elderRage ? 45 : 35); }
+                    for (let i=0;i<8;i++) { const a=Math.random()*Math.PI*2;
+                        game.particles.push(new Particle(cx,cy,Math.cos(a)*100,Math.sin(a)*100,'#aa4422',300,3)); }
+                } else {
+                    // 咆哮: スタン（2秒移動不能）
+                    player.slowTimer = 2000;
+                    game.damageNumbers.push(new DamageNumber(cx,cy-40,0,'#ff8844','ROAR!'));
+                    for (let i=0;i<12;i++) { const a=Math.random()*Math.PI*2;
+                        game.particles.push(new Particle(cx,cy,Math.cos(a)*150,Math.sin(a)*150,'#ffaa44',500,2)); }
+                    Sound.playChargeWarning();
+                }
+            }
+        }
         if (this.isBoss&&this.hp<=this.maxHp*0.5&&this.chargeCooldownTimer<=0&&dist<this.aggroRange) {
             this.state='charge_windup'; this.chargeWindupTimer=this.chargeWindupDuration;
             Sound.playChargeWarning(); this.chargeCooldownTimer=this.chargeCooldown; return;
@@ -900,10 +1050,12 @@ class Monster {
             if (this.attackTimer<=0) {
                 const result = player.takeDamage(this.attackDamage);
                 this.attackTimer=this.attackCooldown;
+                if (result === 'hit' || result === 'block') {
+                    if (game) game.subQuestState.damageTaken++;
+                }
                 if (result === 'parry') {
-                    // パリィ成功: モンスター1秒スタン
                     this.frozenTimer = 1000;
-                    if (game) {
+                    if (game) { game.subQuestState.parryCount++;
                         game.damageNumbers.push(new DamageNumber(this.x+this.width/2,this.y-30,0,'#ffcc00','PARRY!'));
                         for (let i=0;i<6;i++) { const a=Math.random()*Math.PI*2; game.particles.push(new Particle(player.x+player.width/2,player.y+player.height/2,Math.cos(a)*80,Math.sin(a)*80-30,'#ffcc00',300,3)); }
                     }
@@ -1101,7 +1253,18 @@ class Game {
         this.droppedItems = []; this.arrows = []; this.monsters = [];
         this.particles = [];    // パーティクル管理
         this.iceBreaths = [];   // 氷の息（飛翔体）
-        this.damageNumbers = []; // ダメージ数値ポップアップ
+        this.damageNumbers = [];
+        // タイムアタック
+        this.timeAttackMode = false;
+        this.questTimer = 0;      // クエスト経過時間（秒）
+        this.questTimeLimit = 0;  // 制限時間（0=無制限）
+        // サブクエスト追跡
+        this.subQuestState = { damageTaken: 0, parryCount: 0, headBroken: false, tailBroken: false };
+        this.subQuestResults = [];
+        this.subQuestBanner = ''; this.subQuestBannerTimer = 0;
+        // クラフト画面タブ
+        this.craftTab = 0; // 0=CRAFT, 1=UPGRADE
+        this.upgradeCursor = 0;
         // レベルアップ・スキル選択
         this.levelUpTimer = 0;  // LEVEL UP!表示タイマー
         this.skillSelectActive = false;
@@ -1125,6 +1288,8 @@ class Game {
             this.inventory.addMaterial('iceFang', 5);
             this.inventory.addMaterial('iceCrystal', 3);
         }
+        // localStorageからベストタイム復元
+        try { const bt = localStorage.getItem('mh2d_bestTimes'); if (bt) this.inventory.bestTimes = JSON.parse(bt); } catch(e){}
         this.images = {}; this.imagesLoaded = false;
 
         // カメラシェイク
@@ -1207,6 +1372,9 @@ class Game {
         this.monsters = quest.monsters.map(m=>new Monster(m.name,m.x,m.y,m.config));
         this.droppedItems=[]; this.arrows=[]; this.particles=[]; this.iceBreaths=[]; this.damageNumbers=[];
         this.questSuccess=false; this.shakeTimer=0; this.resultAnimTimer=0;
+        this.questTimer=0; this.questTimeLimit=quest.timeLimit||0;
+        this.subQuestState = { damageTaken:0, parryCount:0, headBroken:false, tailBroken:false };
+        this.subQuestResults=[]; this.subQuestBanner=''; this.subQuestBannerTimer=0;
         // ボス登場演出
         if (quest.monsters.some(m => m.config.isBoss)) {
             this.bossIntroActive = true;
@@ -1268,9 +1436,13 @@ class Game {
             if (this.state==='lobby') {
                 if (key==='arrowup'||key==='w') this.lobbyCursor=Math.max(0,this.lobbyCursor-1);
                 else if (key==='arrowdown'||key==='s') this.lobbyCursor=Math.min(QUESTS.length-1,this.lobbyCursor+1);
-                else if (key==='enter'||key==='z') this.startQuest(QUESTS[this.lobbyCursor]);
+                else if (key==='enter'||key==='z') {
+                    const q = QUESTS[this.lobbyCursor];
+                    if (!this.isQuestLocked(q)) this.startQuest(q);
+                }
+                if (key==='t') { this.timeAttackMode=!this.timeAttackMode; }
                 if (key==='i') {this.state='inventory';this._returnToLobby=true;return;}
-                if (key==='c') {this.state='craft';this.craftCursor=0;this._returnToLobby=true;return;}
+                if (key==='c') {this.state='craft';this.craftCursor=0;this.craftTab=0;this._returnToLobby=true;return;}
                 return;
             }
             if (this.state==='result') { if (key==='r'||key==='enter') this.state='lobby'; return; }
@@ -1286,9 +1458,17 @@ class Game {
                 return;
             }
             if (this.state==='craft') {
-                if (key==='arrowup'||key==='w') this.craftCursor=Math.max(0,this.craftCursor-1);
-                else if (key==='arrowdown'||key==='s') this.craftCursor=Math.min(RECIPES.length-1,this.craftCursor+1);
-                else if (key==='enter'||key==='z') this.executeCraft();
+                if (key==='tab'||key==='e') { this.craftTab=1-this.craftTab; this.upgradeCursor=0; return; }
+                if (this.craftTab===0) {
+                    if (key==='arrowup'||key==='w') this.craftCursor=Math.max(0,this.craftCursor-1);
+                    else if (key==='arrowdown'||key==='s') this.craftCursor=Math.min(RECIPES.length-1,this.craftCursor+1);
+                    else if (key==='enter'||key==='z') this.executeCraft();
+                } else {
+                    const items=[...this.inventory.weapons.filter(w=>w.name!=='Basic Sword'),...this.inventory.armors];
+                    if (key==='arrowup'||key==='w') this.upgradeCursor=Math.max(0,this.upgradeCursor-1);
+                    else if (key==='arrowdown'||key==='s') this.upgradeCursor=Math.min(items.length-1,this.upgradeCursor+1);
+                    else if (key==='enter'||key==='z') this.executeUpgrade(items);
+                }
                 return;
             }
             // スキル選択画面
@@ -1328,6 +1508,32 @@ class Game {
             }
         });
         this.canvas.addEventListener('mousemove',(e)=>{const r=this.canvas.getBoundingClientRect();this.mouseX=e.clientX-r.left;this.mouseY=e.clientY-r.top;});
+    }
+
+    isQuestLocked(quest) {
+        if (!quest.unlockCondition) return false;
+        if (quest.unlockCondition === 'allClear+lv5') {
+            const baseIds = ['forestDrake','doubleDrake','iceWolf','giantDrake'];
+            const allCleared = baseIds.every(id => this.inventory.clearedQuests.has(id));
+            return !allCleared || !this.player || (this.player && this.player.level < 5);
+        }
+        if (quest.unlockCondition === 'elderClear') {
+            return !this.inventory.clearedQuests.has('elderDrake');
+        }
+        return false;
+    }
+
+    executeUpgrade(items) {
+        if (this.upgradeCursor >= items.length) return;
+        const item = items[this.upgradeCursor];
+        let success = false;
+        if (item instanceof Weapon) {
+            success = this.inventory.upgradeWeapon(item);
+        } else if (item instanceof Armor) {
+            success = this.inventory.upgradeArmor(item);
+        }
+        if (success) { this.craftMessage = `Upgraded to ${item.getDisplayName ? item.getDisplayName() : item.name}+${item.upgradeLevel}!`; this.craftMessageTimer = 2000; Sound.playLevelUp(); }
+        else { this.craftMessage = 'Not enough materials!'; this.craftMessageTimer = 1500; }
     }
 
     executeCraft() {
@@ -1389,7 +1595,14 @@ class Game {
                         const nl = partBroken ? 'BREAK!' : (isWeak ? 'WEAK!' : 'CHARGE!');
                         this.damageNumbers.push(new DamageNumber(m.x+m.width/2,m.y-20,dmg,nc,nl));
                         this.spawnHitParticles(m.x+m.width/2,m.y+m.height/2,10,true);
-                        if (partBroken) { Sound.playPartBreak(); const matId=partBroken==='head'?'drakeHeadScale':'drakeTail'; const item=new DroppedItem(m.x+m.width/2,m.y+m.height/2,matId,1);item.setScatter(m.x+m.width/2,m.y+m.height/2);this.droppedItems.push(item); }
+                        if (partBroken) {
+            Sound.playPartBreak();
+            if (partBroken==='head') this.subQuestState.headBroken=true;
+            if (partBroken==='tail') this.subQuestState.tailBroken=true;
+            const matId=partBroken==='head'?'drakeHeadScale':'drakeTail';
+            const item=new DroppedItem(monster.x+monster.width/2,monster.y+monster.height/2,matId,1);
+            item.setScatter(monster.x+monster.width/2,monster.y+monster.height/2);this.droppedItems.push(item);
+        }
                         if (!m.alive) { Sound.playMonsterDie(); this.onMonsterDefeated(m); }
                     }
                 }
@@ -1541,7 +1754,32 @@ class Game {
         if (this.monsters.every(m=>!m.alive)) {
             this.questSuccess=true;
             this.questRewards=this.currentQuest.rewards.map(r=>({...r}));
-            for (const r of this.questRewards) this.inventory.addMaterial(r.materialId, r.count);
+            // サブクエスト判定
+            this.subQuestResults = [];
+            let expMult = 1, matMult = 1;
+            if (this.subQuestState.damageTaken === 0) { this.subQuestResults.push(SUB_QUESTS[0]); expMult = 2; }
+            if (this.questTimer <= 60) { this.subQuestResults.push(SUB_QUESTS[1]); matMult = 2; }
+            if (this.subQuestState.headBroken && this.subQuestState.tailBroken) this.subQuestResults.push(SUB_QUESTS[2]);
+            if (this.subQuestState.parryCount >= 3) {
+                this.subQuestResults.push(SUB_QUESTS[3]);
+                this.questRewards.push({ materialId: 'drakeCore', count: 1 });
+            }
+            // 報酬適用
+            for (const r of this.questRewards) {
+                this.inventory.addMaterial(r.materialId, r.count * matMult);
+            }
+            // クリア記録
+            this.inventory.clearedQuests.add(this.currentQuest.id);
+            // 称号
+            if (this.currentQuest.id === 'abyss') this.inventory.title = 'Dragon Slayer';
+            // タイムアタック記録
+            if (this.timeAttackMode) {
+                const prev = this.inventory.bestTimes[this.currentQuest.id];
+                if (!prev || this.questTimer < prev) {
+                    this.inventory.bestTimes[this.currentQuest.id] = Math.round(this.questTimer * 100) / 100;
+                    try { localStorage.setItem('mh2d_bestTimes', JSON.stringify(this.inventory.bestTimes)); } catch(e){}
+                }
+            }
             Sound.playQuestComplete();
             this.resultTimer=this.resultDuration; this.resultAnimTimer=0;
             this.spawnVictoryParticles();
@@ -1601,6 +1839,15 @@ class Game {
 
         if (this.state!=='playing') return;
 
+        // クエストタイマー
+        this.questTimer += dt;
+        if (this.subQuestBannerTimer > 0) this.subQuestBannerTimer -= dt * 1000;
+        // 制限時間チェック
+        if (this.questTimeLimit > 0 && this.questTimer >= this.questTimeLimit) {
+            this.questSuccess=false; Sound.playQuestFailed();
+            this.resultTimer=this.resultDuration; this.resultAnimTimer=0;
+            this.state='gameover'; return;
+        }
         this.player.update(dt, this.keys, this.canvas.width, this.canvas.height, TREES);
         // Frost Blade 2連撃目のヒット判定
         if (this.player._frostSecondHitReady) {
@@ -1864,6 +2111,24 @@ class Game {
             ctx.fillStyle='#8888ff';ctx.font='bold 12px monospace';ctx.textAlign='left';
             ctx.fillText('BLOCKING',pBarX,pBarY+75);
         }
+        // クエストタイマー（上部中央）
+        if (this.timeAttackMode || this.questTimeLimit > 0) {
+            ctx.fillStyle='#fff'; ctx.font='bold 18px monospace'; ctx.textAlign='center';
+            const t = this.questTimeLimit > 0 ? Math.max(0, this.questTimeLimit - this.questTimer) : this.questTimer;
+            const m = Math.floor(t/60), s = Math.floor(t%60), ms = Math.floor((t%1)*100);
+            ctx.fillText(`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(ms).padStart(2,'0')}`, 400, 18);
+        }
+        // 称号表示
+        if (this.inventory.title) {
+            ctx.fillStyle='#ffcc44'; ctx.font='bold 11px monospace'; ctx.textAlign='right';
+            ctx.fillText(this.inventory.title, 780, 590);
+        }
+        // サブクエストバナー
+        if (this.subQuestBannerTimer > 0) {
+            const a = Math.min(1, this.subQuestBannerTimer/500);
+            ctx.globalAlpha=a; ctx.fillStyle='#44ff44'; ctx.font='bold 20px monospace'; ctx.textAlign='center';
+            ctx.fillText(this.subQuestBanner, 400, 160); ctx.globalAlpha=1;
+        }
 
         // === モンスターHPバー（遅延ダメージ表現） ===
         const alive = this.monsters.filter(m=>m.alive);
@@ -1956,10 +2221,27 @@ class Game {
             ctx.globalAlpha = 1;
             ry += 35;
         }
+        // サブクエスト結果
+        if (this.subQuestResults.length > 0 && t > 1.5) {
+            ctx.fillStyle = '#ffcc44'; ctx.font = 'bold 14px monospace'; ctx.textAlign = 'center';
+            ctx.fillText('SUB QUEST COMPLETE!', 400, ry + 10);
+            ry += 25;
+            ctx.font = '12px monospace'; ctx.fillStyle = '#aaa';
+            for (const sq of this.subQuestResults) {
+                ctx.fillText(`${sq.name}: ${sq.desc}`, 400, ry);
+                ry += 20;
+            }
+        }
+        // タイムアタック結果
+        if (this.timeAttackMode) {
+            ctx.fillStyle='#ffcc44'; ctx.font='bold 14px monospace'; ctx.textAlign='center';
+            const time = this.questTimer.toFixed(2);
+            const best = this.inventory.bestTimes[this.currentQuest.id];
+            ctx.fillText(`TIME: ${time}s${best && best <= this.questTimer ? '' : ' NEW BEST!'}`, 400, ry + 30);
+        }
         // カウントダウン
         ctx.fillStyle='#aaa'; ctx.font='16px monospace'; ctx.textAlign='center';
-        ctx.fillText(`Returning to lobby in ${Math.max(0,Math.ceil(this.resultTimer))}s  (R: now)`, 400, 480);
-        // 金パーティクルは drawField で描画済み
+        ctx.fillText(`Returning to lobby in ${Math.max(0,Math.ceil(this.resultTimer))}s  (R: now)`, 400, 520);
         ctx.restore();
     }
 
@@ -2172,11 +2454,24 @@ class Game {
             ctx.fillStyle='#aaa';ctx.font='11px monospace';
             let rt='Reward: ';for(const r of q.rewards)rt+=`${MATERIALS[r.materialId].name} x${r.count}  `;
             ctx.fillText(rt,cx+15,cy+90);
+            // ロック表示
+            if (this.isQuestLocked(q)) {
+                ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(cx,cy,cw,ch);
+                ctx.fillStyle='#ff4444'; ctx.font='bold 14px monospace'; ctx.textAlign='center';
+                ctx.fillText('LOCKED', cx+cw/2, cy+50);
+            }
+            // ベストタイム表示
+            const bt = this.inventory.bestTimes[q.id];
+            if (bt) {
+                ctx.fillStyle='#ffcc44'; ctx.font='10px monospace'; ctx.textAlign='right';
+                ctx.fillText(`BEST: ${bt.toFixed(2)}s`, cx+cw-10, cy+20);
+            }
             if(sel){ctx.fillStyle='#cc8844';ctx.font='bold 20px monospace';ctx.textAlign='right';ctx.fillText('>',cx-5,cy+52);}
             cy+=ch+20;
         }
         ctx.fillStyle='rgba(255,255,255,0.4)';ctx.font='13px monospace';ctx.textAlign='center';
-        ctx.fillText('W/S:Select  Z/Enter/Click:Start  I:Inventory  C:Craft',400,580);
+        const taLabel = this.timeAttackMode ? ' [TA:ON]' : '';
+        ctx.fillText(`W/S:Select  Z:Start  T:TimeAtk${taLabel}  I:Inv  C:Craft`,400,580);
         ctx.restore();
     }
     getDifficultyStars(l) { let s='';for(let i=0;i<3;i++)s+=i<l?'\u2605':'\u2606';return s; }
@@ -2259,11 +2554,77 @@ class Game {
         ctx.fillStyle = '#0d0d1a';
         ctx.fillRect(0, 0, 800, 600);
         // タイトル
-        ctx.fillStyle = '#cc8844'; ctx.font = 'bold 28px monospace'; ctx.textAlign = 'center';
-        ctx.fillText('CRAFT', 400, 40);
+        // タブ表示
+        const tabNames = ['CRAFT', 'UPGRADE'];
+        for (let t = 0; t < 2; t++) {
+            const tx = 200 + t * 200, tw = 160;
+            ctx.fillStyle = this.craftTab === t ? '#cc8844' : '#444';
+            roundRect(ctx, tx, 10, tw, 30, 5); ctx.fill();
+            ctx.fillStyle = this.craftTab === t ? '#fff' : '#888';
+            ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
+            ctx.fillText(tabNames[t], tx + tw / 2, 30);
+        }
         ctx.strokeStyle = '#443322'; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(30, 52); ctx.lineTo(770, 52); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(30, 48); ctx.lineTo(770, 48); ctx.stroke();
 
+        if (this.craftTab === 1) {
+            // === UPGRADEタブ ===
+            const items = [...this.inventory.weapons.filter(w=>w.name!=='Basic Sword'), ...this.inventory.armors];
+            let uy = 65;
+            if (items.length === 0) {
+                ctx.fillStyle = '#666'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
+                ctx.fillText('No upgradeable items', 400, 200);
+            } else {
+                for (let i = 0; i < items.length; i++) {
+                    const item = items[i];
+                    const sel = i === this.upgradeCursor;
+                    const isWeapon = item instanceof Weapon;
+                    const canUp = isWeapon ? this.inventory.canUpgrade(item) : this.inventory.canUpgradeArmor(item);
+                    const lvl = item.upgradeLevel || 0;
+                    const maxed = lvl >= 3;
+                    // カード
+                    ctx.fillStyle = sel ? 'rgba(100,150,200,0.15)' : '#111122';
+                    roundRect(ctx, 30, uy, 740, 55, 6); ctx.fill();
+                    if (sel) { ctx.strokeStyle = '#4488cc'; ctx.lineWidth = 2; roundRect(ctx, 30, uy, 740, 55, 6); ctx.stroke(); }
+                    // 名前
+                    ctx.fillStyle = sel ? '#fff' : '#aaa'; ctx.font = 'bold 14px monospace'; ctx.textAlign = 'left';
+                    const dname = item.getDisplayName ? item.getDisplayName() : `${item.name}+${lvl}`;
+                    ctx.fillText(dname, 50, uy + 22);
+                    // レベルドット
+                    ctx.font = '12px monospace'; ctx.fillStyle = '#888';
+                    let dots = ''; for (let d = 0; d < 3; d++) dots += d < lvl ? '\u2605' : '\u2606';
+                    ctx.fillText(dots, 250, uy + 22);
+                    // ステータス
+                    if (isWeapon) { ctx.fillStyle='#aaa'; ctx.fillText(`DMG:${item.damage}`, 330, uy+22); }
+                    else { ctx.fillText(`x${item.damageMultiplier}`, 330, uy+22); }
+                    // コスト表示
+                    if (!maxed) {
+                        const id = this.inventory.getWeaponId ? this.inventory.getWeaponId(item) : 'drakeArmor';
+                        const costDef = UPGRADE_COSTS[id || 'drakeArmor'];
+                        if (costDef) {
+                            const c = costDef.costs[lvl];
+                            ctx.fillStyle = '#888'; ctx.font = '11px monospace';
+                            ctx.fillText(`Cost: ${MATERIALS[costDef.mat].name} x${c.m}${c.c>0?' + Core x'+c.c:''}`, 50, uy+42);
+                        }
+                    } else {
+                        ctx.fillStyle = '#ffcc00'; ctx.font = '11px monospace';
+                        ctx.fillText('MAX LEVEL', 50, uy + 42);
+                    }
+                    // ボタン
+                    if (sel && !maxed) {
+                        const bx = 640, by = uy + 8, bw = 110, bh = 26;
+                        ctx.fillStyle = canUp ? '#44aa44' : '#333';
+                        roundRect(ctx, bx, by, bw, bh, 4); ctx.fill();
+                        ctx.fillStyle = canUp ? '#fff' : '#777';
+                        ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
+                        ctx.fillText('UPGRADE [Z]', bx + bw/2, by + 17);
+                        ctx.textAlign = 'left';
+                    }
+                    uy += 62;
+                }
+            }
+        } else {
+        // === CRAFTタブ（既存の2列グリッド） ===
         // 2列グリッドでレシピカード配置
         // 左列: 0,2,4  右列: 1,3,5
         const cardW = 360, cardH = 140, gap = 15;
@@ -2344,6 +2705,8 @@ class Game {
             }
         }
 
+        } // craftTab === 0 の閉じ括弧
+
         // クラフトメッセージ
         if (this.craftMessageTimer > 0) {
             const alpha = Math.min(1, this.craftMessageTimer / 300);
@@ -2354,7 +2717,7 @@ class Game {
 
         // 操作ガイド（最下部固定）
         ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
-        ctx.fillText('W/S:Select  Z:Craft  C:Close', 400, 580);
+        ctx.fillText('W/S:Select  Z:Execute  E:Tab  C:Close', 400, 580);
         ctx.restore();
     }
 }
