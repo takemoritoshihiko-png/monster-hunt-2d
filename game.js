@@ -1411,6 +1411,9 @@ class Game {
     constructor(canvasId) {
         this.canvas = document.getElementById(canvasId);
         this.ctx = this.canvas.getContext('2d');
+        // 画面サイズ追従
+        this.resizeCanvas();
+        window.addEventListener('resize', () => this.resizeCanvas());
         this.keys = {};
         this.state = 'title'; this.lastTime = 0;
         this.titleTimer = 0; // タイトル画面の経過時間
@@ -1552,44 +1555,46 @@ class Game {
         this.grassCanvas = gc;
     }
 
+    /** Canvasを画面サイズに合わせる */
+    resizeCanvas() {
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+        this.W = this.canvas.width;
+        this.H = this.canvas.height;
+        // ロビー背景を再生成
+        this.generateLobbyBg();
+    }
+
     /** ロビー背景（星・山・森・月）のプリレンダリング */
     generateLobbyBg() {
-        const c = document.createElement('canvas'); c.width = 800; c.height = 600;
+        const W = this.W || 800, H = this.H || 600;
+        const c = document.createElement('canvas'); c.width = W; c.height = H;
         const g = c.getContext('2d');
-        // グラデーション背景
-        const grad = g.createLinearGradient(0, 0, 0, 600);
-        grad.addColorStop(0, '#0a0a1a');
-        grad.addColorStop(1, '#1a0a0a');
-        g.fillStyle = grad; g.fillRect(0, 0, 800, 600);
-        // 星（100個・シード固定）
+        const grad = g.createLinearGradient(0, 0, 0, H);
+        grad.addColorStop(0, '#0a0a1a'); grad.addColorStop(1, '#1a0a0a');
+        g.fillStyle = grad; g.fillRect(0, 0, W, H);
         const rng = new SeededRandom(77);
         for (let i = 0; i < 100; i++) {
-            const sx = rng.next() * 800, sy = rng.next() * 400;
-            const sr = 0.5 + rng.next() * 1.5;
-            g.fillStyle = `rgba(255,255,255,${0.3 + rng.next() * 0.5})`;
-            g.beginPath(); g.arc(sx, sy, sr, 0, Math.PI * 2); g.fill();
+            const sx = rng.next()*W, sy = rng.next()*H*0.65, sr = 0.5+rng.next()*1.5;
+            g.fillStyle = `rgba(255,255,255,${0.3+rng.next()*0.5})`;
+            g.beginPath(); g.arc(sx, sy, sr, 0, Math.PI*2); g.fill();
         }
-        // 満月（右上）
-        g.fillStyle = 'rgba(255,255,220,0.06)';
-        g.beginPath(); g.arc(680, 80, 60, 0, Math.PI * 2); g.fill();
-        g.fillStyle = 'rgba(255,255,220,0.1)';
-        g.beginPath(); g.arc(680, 80, 35, 0, Math.PI * 2); g.fill();
-        g.fillStyle = 'rgba(255,255,230,0.7)';
-        g.beginPath(); g.arc(680, 80, 22, 0, Math.PI * 2); g.fill();
-        // 遠景の山シルエット
-        g.fillStyle = '#0c0c18';
-        g.beginPath(); g.moveTo(0, 500);
-        g.lineTo(80, 380); g.lineTo(180, 440); g.lineTo(280, 360); g.lineTo(400, 420);
-        g.lineTo(500, 340); g.lineTo(600, 400); g.lineTo(720, 350); g.lineTo(800, 410);
-        g.lineTo(800, 600); g.lineTo(0, 600); g.closePath(); g.fill();
-        // 中景の森シルエット
-        g.fillStyle = '#080812';
-        g.beginPath(); g.moveTo(0, 520);
-        for (let x = 0; x <= 800; x += 20) {
-            const h = 480 + Math.sin(x * 0.02) * 30 + Math.sin(x * 0.05) * 15;
-            g.lineTo(x, h - (x % 40 < 20 ? 15 : 0));
+        // 月
+        const moonX = W*0.85, moonY = H*0.13;
+        g.fillStyle='rgba(255,255,220,0.06)'; g.beginPath(); g.arc(moonX,moonY,60,0,Math.PI*2); g.fill();
+        g.fillStyle='rgba(255,255,220,0.1)'; g.beginPath(); g.arc(moonX,moonY,35,0,Math.PI*2); g.fill();
+        g.fillStyle='rgba(255,255,230,0.7)'; g.beginPath(); g.arc(moonX,moonY,22,0,Math.PI*2); g.fill();
+        // 山
+        g.fillStyle='#0c0c18'; g.beginPath(); g.moveTo(0,H*0.83);
+        for (let x=0;x<=W;x+=W/10) g.lineTo(x, H*0.6+Math.sin(x*0.008)*H*0.1);
+        g.lineTo(W,H); g.lineTo(0,H); g.closePath(); g.fill();
+        // 森
+        g.fillStyle='#080812'; g.beginPath(); g.moveTo(0,H*0.87);
+        for (let x=0;x<=W;x+=20) {
+            const h=H*0.8+Math.sin(x*0.02)*H*0.05+Math.sin(x*0.05)*H*0.025;
+            g.lineTo(x, h-(x%40<20?H*0.025:0));
         }
-        g.lineTo(800, 600); g.lineTo(0, 600); g.closePath(); g.fill();
+        g.lineTo(W,H); g.lineTo(0,H); g.closePath(); g.fill();
         this.lobbyBgCanvas = c;
     }
 
@@ -1884,7 +1889,7 @@ class Game {
         this.canvas.addEventListener('click',(e)=>{
             if (this.state!=='lobby') return;
             const r=this.canvas.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
-            const cw=600,ch=100,cx=(800-cw)/2; let cy=120;
+            const cw=Math.min(600,this.W*0.75),ch=100,cx=(this.W-cw)/2; let cy=120;
             for (let i=0;i<QUESTS.length;i++) {
                 if (mx>=cx&&mx<=cx+cw&&my>=cy&&my<=cy+ch) {this.lobbyCursor=i;this.startQuest(QUESTS[i]);return;}
                 cy+=ch+20;
@@ -2265,10 +2270,10 @@ class Game {
         }
         this.player.update(dt, this.keys, WORLD_W, WORLD_H, TREES);
         // カメラ追従
-        this.camera.x = this.player.x + this.player.width/2 - this.canvas.width/2;
-        this.camera.y = this.player.y + this.player.height/2 - this.canvas.height/2;
-        this.camera.x = Math.max(0, Math.min(WORLD_W - this.canvas.width, this.camera.x));
-        this.camera.y = Math.max(0, Math.min(WORLD_H - this.canvas.height, this.camera.y));
+        this.camera.x = this.player.x + this.player.width/2 - this.W/2;
+        this.camera.y = this.player.y + this.player.height/2 - this.H/2;
+        this.camera.x = Math.max(0, Math.min(WORLD_W - this.W, this.camera.x));
+        this.camera.y = Math.max(0, Math.min(WORLD_H - this.H, this.camera.y));
         // Frost Blade 2連撃目のヒット判定
         if (this.player._frostSecondHitReady) {
             this.player._frostSecondHitReady = false;
@@ -2391,8 +2396,8 @@ class Game {
 
     drawSaveMenu(ctx) {
         ctx.save(); ctx.globalAlpha = 1;
-        ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(0, 0, 800, 600);
-        const pw = 300, ph = 220, px = (800-pw)/2, py = (600-ph)/2;
+        ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(0,0,this.W,this.H);
+        const pw = 300, ph = 220, px = (this.W-pw)/2, py = (this.H-ph)/2;
         ctx.fillStyle = '#1a1a2e';
         roundRect(ctx, px, py, pw, ph, 10); ctx.fill();
         ctx.strokeStyle = '#cc8844'; ctx.lineWidth = 2;
@@ -2435,8 +2440,8 @@ class Game {
         // マップ背景（カメラ範囲のみ描画）
         if (this.grassCanvas) {
             ctx.drawImage(this.grassCanvas,
-                this.camera.x, this.camera.y, 800, 600,
-                this.camera.x, this.camera.y, 800, 600);
+                this.camera.x, this.camera.y, this.W, this.H,
+                this.camera.x, this.camera.y, this.W, this.H);
         } else {
             ctx.fillStyle = '#2d5a27'; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
         }
@@ -2488,10 +2493,10 @@ class Game {
         if (bossPhase2) {
             ctx.save();
             const pa = 0.08 + Math.sin(Date.now() * 0.005) * 0.05;
-            const g = ctx.createRadialGradient(400, 300, 200, 400, 300, 450);
+            const g = ctx.createRadialGradient(this.W/2, this.H/2, this.W*0.25, this.W/2, this.H/2, this.W*0.56);
             g.addColorStop(0, 'rgba(0,0,0,0)');
             g.addColorStop(1, `rgba(150,0,0,${pa})`);
-            ctx.fillStyle = g; ctx.fillRect(0, 0, 800, 600);
+            ctx.fillStyle = g; ctx.fillRect(0,0,this.W,this.H);
             ctx.restore();
         }
         // HUD
@@ -2608,7 +2613,7 @@ class Game {
         if (alive.length>0) {
             const mBarW=300, mBarH=18; let mBarY=25;
             for (const m of alive) {
-                const mBarX=(800-mBarW)/2;
+                const mBarX=(this.W-mBarW)/2;
                 ctx.fillStyle='#fff'; ctx.font='bold 13px monospace'; ctx.textAlign='center';
                 ctx.fillText(m.name, 400, mBarY-4);
                 // バー背景（角丸）
@@ -2637,7 +2642,7 @@ class Game {
         }
 
         // 装備表示
-        const eqX=this.canvas.width-210; let eqY=this.canvas.height-55;
+        const eqX=this.W-210; let eqY=this.H-55;
         if (this.player.armor) eqY-=22;
         ctx.fillStyle='rgba(0,0,0,0.5)';
         const eqH=this.player.armor?57:35;
@@ -2667,7 +2672,7 @@ class Game {
     // ========================================
     drawQuestComplete(ctx) {
         ctx.save(); ctx.globalAlpha=1;
-        ctx.fillStyle='rgba(0,0,0,0.75)'; ctx.fillRect(0,0,800,600);
+        ctx.fillStyle='rgba(0,0,0,0.75)'; ctx.fillRect(0,0,this.W,this.H);
         const t = this.resultAnimTimer;
         // タイトルスライドイン（上から）
         const titleY = Math.min(220, -50 + t * 500);
@@ -2727,10 +2732,10 @@ class Game {
         // 赤フェードオーバーレイ
         const redAlpha = Math.min(0.4, t * 0.5);
         ctx.fillStyle = `rgba(100,0,0,${redAlpha})`;
-        ctx.fillRect(0,0,800,600);
+        ctx.fillRect(0,0,this.W,this.H);
         // 黒オーバーレイ
         ctx.fillStyle = `rgba(0,0,0,${Math.min(0.6, t*0.4)})`;
-        ctx.fillRect(0,0,800,600);
+        ctx.fillRect(0,0,this.W,this.H);
         // テキスト
         if (t > 0.5) {
             const a = Math.min(1, (t-0.5)/0.3);
@@ -2752,7 +2757,7 @@ class Game {
     // ========================================
     drawSkillSelect(ctx) {
         ctx.save(); ctx.globalAlpha = 1;
-        ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0,0,800,600);
+        ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0,0,this.W,this.H);
         ctx.fillStyle = '#ffcc00'; ctx.font = 'bold 28px monospace'; ctx.textAlign = 'center';
         ctx.fillText('LEVEL UP! Select a Skill', 400, 150);
         const cardW = 400, cardH = 70;
@@ -2786,7 +2791,7 @@ class Game {
     // ========================================
     drawBossIntro(ctx) {
         ctx.save(); ctx.globalAlpha = 1;
-        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 800, 600);
+        ctx.fillStyle = '#000'; ctx.fillRect(0,0,this.W,this.H);
         const t = 3 - this.bossIntroTimer; // 経過時間
         if (t > 0.5) {
             const a = Math.min(1, (t - 0.5) / 0.5);
@@ -2801,7 +2806,7 @@ class Game {
             const pulse = Math.sin(t * 6) * 0.15;
             ctx.globalAlpha = Math.max(0, pulse);
             ctx.fillStyle = '#330000';
-            ctx.fillRect(0, 0, 800, 600);
+            ctx.fillRect(0,0,this.W,this.H);
         }
         ctx.globalAlpha = 1;
         ctx.restore();
@@ -2818,7 +2823,7 @@ class Game {
         grad.addColorStop(0.5, '#143814');
         grad.addColorStop(1, '#0a1a0a');
         ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, 800, 600);
+        ctx.fillRect(0,0,this.W,this.H);
         // 装飾パーティクル（ゆっくり浮かぶ光）
         const t = this.titleTimer;
         for (let i = 0; i < 15; i++) {
@@ -2869,7 +2874,7 @@ class Game {
     // ========================================
     drawMinimap(ctx) {
         const mmW = 150, mmH = 112;
-        const mmX = this.canvas.width - mmW - 10, mmY = 10;
+        const mmX = this.W - mmW - 10, mmY = 10;
         const scaleX = mmW / WORLD_W, scaleY = mmH / WORLD_H;
         ctx.save();
         // 背景（エリア色分け）
@@ -2897,8 +2902,8 @@ class Game {
         ctx.strokeRect(
             mmX + this.camera.x * scaleX,
             mmY + this.camera.y * scaleY,
-            800 * scaleX,
-            600 * scaleY
+            this.W * scaleX,
+            this.H * scaleY
         );
         // モンスター（赤い点）
         for (const m of this.monsters) {
@@ -2924,12 +2929,12 @@ class Game {
 
         // === プリレンダリング背景 ===
         if (this.lobbyBgCanvas) ctx.drawImage(this.lobbyBgCanvas, 0, 0);
-        else { ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, 0, 800, 600); }
+        else { ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0,0,this.W,this.H); }
 
         // === 星の明滅（動的レイヤー） ===
         const rng2 = new SeededRandom(77);
         for (let i = 0; i < 100; i++) {
-            const sx = rng2.next() * 800, sy = rng2.next() * 400;
+            const sx = rng2.next() * this.W, sy = rng2.next() * this.H*0.65;
             const sr = 0.5 + rng2.next() * 1.5;
             const flicker = 0.3 + Math.sin(t * (1.5 + rng2.next() * 2) + i) * 0.3;
             ctx.fillStyle = `rgba(255,255,255,${flicker})`;
@@ -2938,33 +2943,30 @@ class Game {
 
         // === 龍のシルエット ===
         ctx.save();
-        const dragonY = 180 + Math.sin(t * Math.PI / 2) * 15;
+        const dragonBaseX = this.W*0.85, dragonY = this.H*0.3 + Math.sin(t * Math.PI / 2) * 15;
         ctx.globalAlpha = 0.12;
         ctx.fillStyle = '#000';
-        // 胴体
-        ctx.beginPath(); ctx.ellipse(680, dragonY, 80, 50, 0, 0, Math.PI * 2); ctx.fill();
-        // 頭
-        ctx.beginPath(); ctx.ellipse(610, dragonY - 30, 30, 25, -0.3, 0, Math.PI * 2); ctx.fill();
-        // 尾
-        ctx.beginPath(); ctx.moveTo(760, dragonY); ctx.quadraticCurveTo(810, dragonY + 20, 790, dragonY + 60); ctx.lineTo(770, dragonY + 40); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(dragonBaseX, dragonY, 80, 50, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(dragonBaseX-70, dragonY - 30, 30, 25, -0.3, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(dragonBaseX+80, dragonY); ctx.quadraticCurveTo(dragonBaseX+130, dragonY + 20, dragonBaseX+110, dragonY + 60); ctx.lineTo(dragonBaseX+90, dragonY + 40); ctx.closePath(); ctx.fill();
         // 翼（開閉アニメーション）
         const wingSpread = 0.8 + Math.sin(t * 1.5) * 0.2;
         ctx.beginPath();
-        ctx.moveTo(660, dragonY - 20);
-        ctx.lineTo(660 - 80 * wingSpread, dragonY - 80 * wingSpread);
-        ctx.lineTo(660 - 30, dragonY - 10);
+        ctx.moveTo(dragonBaseX-20, dragonY - 20);
+        ctx.lineTo(dragonBaseX-20 - 80 * wingSpread, dragonY - 80 * wingSpread);
+        ctx.lineTo(dragonBaseX-20 - 30, dragonY - 10);
         ctx.closePath(); ctx.fill();
         ctx.beginPath();
-        ctx.moveTo(700, dragonY - 20);
-        ctx.lineTo(700 + 70 * wingSpread, dragonY - 70 * wingSpread);
-        ctx.lineTo(700 + 25, dragonY - 10);
+        ctx.moveTo(dragonBaseX+20, dragonY - 20);
+        ctx.lineTo(dragonBaseX+20 + 70 * wingSpread, dragonY - 70 * wingSpread);
+        ctx.lineTo(dragonBaseX+20 + 25, dragonY - 10);
         ctx.closePath(); ctx.fill();
         ctx.restore();
 
         // === 火の粉パーティクル ===
         for (let i = 0; i < 20; i++) {
-            const fx = (i * 43 + t * 20) % 800;
-            const fy = 580 - ((t * 25 + i * 30) % 600);
+            const fx = (i * 43 + t * 20) % this.W;
+            const fy = (this.H-20) - ((t * 25 + i * 30) % this.H);
             const fa = 0.15 + Math.sin(t * 3 + i * 2) * 0.1;
             ctx.fillStyle = `rgba(255,${130 + i * 5},30,${fa})`;
             ctx.beginPath(); ctx.arc(fx, fy, 1.5, 0, Math.PI * 2); ctx.fill();
@@ -2973,24 +2975,24 @@ class Game {
         // === タイトルロゴ ===
         ctx.font = 'bold 44px monospace'; ctx.textAlign = 'center';
         // 影
-        ctx.fillStyle = '#331a00'; ctx.fillText('MONSTER HUNT 2D', 402, 42);
-        // 本体（ゴールド）
-        ctx.fillStyle = '#ffcc44'; ctx.fillText('MONSTER HUNT 2D', 400, 40);
+        const cx = this.W/2;
+        ctx.fillStyle = '#331a00'; ctx.fillText('MONSTER HUNT 2D', cx+2, 42);
+        ctx.fillStyle = '#ffcc44'; ctx.fillText('MONSTER HUNT 2D', cx, 40);
         // アンダーライン（流れる光）
         const lineProgress = (t * 0.4) % 1;
-        const lineGrad = ctx.createLinearGradient(100, 0, 700, 0);
+        const lineGrad = ctx.createLinearGradient(cx-300, 0, cx+300, 0);
         lineGrad.addColorStop(Math.max(0, lineProgress - 0.15), 'rgba(255,80,30,0)');
         lineGrad.addColorStop(lineProgress, 'rgba(255,80,30,0.8)');
         lineGrad.addColorStop(Math.min(1, lineProgress + 0.15), 'rgba(255,80,30,0)');
         ctx.strokeStyle = lineGrad; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(150, 48); ctx.lineTo(650, 48); ctx.stroke();
-        // サブタイトル
+        ctx.beginPath(); ctx.moveTo(cx-250, 48); ctx.lineTo(cx+250, 48); ctx.stroke();
         ctx.fillStyle = '#887755'; ctx.font = 'italic 13px monospace';
-        ctx.fillText('Hunt. Craft. Survive.', 400, 65);
+        ctx.fillText('Hunt. Craft. Survive.', cx, 65);
 
         // === クエストカード（2列グリッド） ===
-        const cardW = 355, cardH = 120, gap = 8;
-        const colX = [15, 415 - 15 + 15]; // 左=15, 右=415
+        const cardW = Math.min(355, (this.W-45)/2), cardH = Math.min(120, (this.H-200)/3);
+        const gap = 8;
+        const colX = [15, this.W/2 + 5];
         const startY = 80;
         const diffColors = ['#44aa44', '#ccaa22', '#cc4444', '#aa44cc'];
 
@@ -3090,39 +3092,40 @@ class Game {
         }
 
         // === プレイヤーステータスパネル（左下） ===
+        const spY = this.H - 125;
         ctx.fillStyle = 'rgba(10,10,20,0.75)';
-        roundRect(ctx, 10, 475, 210, 110, 8); ctx.fill();
+        roundRect(ctx, 10, spY, 210, 110, 8); ctx.fill();
         ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
-        roundRect(ctx, 10, 475, 210, 110, 8); ctx.stroke();
+        roundRect(ctx, 10, spY, 210, 110, 8); ctx.stroke();
         // プレイヤーアイコン（簡易シルエット）
         ctx.fillStyle = '#2a6a2a';
-        ctx.beginPath(); ctx.arc(35, 500, 10, 0, Math.PI * 2); ctx.fill();
-        ctx.fillRect(29, 510, 12, 15);
+        ctx.beginPath(); ctx.arc(35, spY+25, 10, 0, Math.PI * 2); ctx.fill();
+        ctx.fillRect(29, spY+35, 12, 15);
         // レベル・称号
         const pLvl = this.player ? this.player.level : (this.inventory._lastLevel || 1);
         ctx.fillStyle = '#fff'; ctx.font = 'bold 13px monospace'; ctx.textAlign = 'left';
-        ctx.fillText(`Lv ${pLvl}`, 55, 502);
+        ctx.fillText(`Lv ${pLvl}`, 55, spY+27);
         ctx.fillStyle = '#cc9944'; ctx.font = '11px monospace';
-        ctx.fillText(this.inventory.title || 'Novice', 55, 518);
-        // 討伐数
+        ctx.fillText(this.inventory.title || 'Novice', 55, spY+43);
         ctx.fillStyle = '#888'; ctx.font = '10px monospace';
-        ctx.fillText(`Total Hunts: ${this.totalHunts}`, 18, 545);
+        ctx.fillText(`Total Hunts: ${this.totalHunts}`, 18, spY+70);
         // EXPバー
         if (this.player) {
             const expR = this.player.level >= MAX_LEVEL ? 1 : this.player.exp / this.player.getExpToNext();
-            ctx.fillStyle = '#222'; roundRect(ctx, 18, 555, 190, 8, 3); ctx.fill();
-            ctx.save(); roundRect(ctx, 18, 555, 190, 8, 3); ctx.clip();
-            ctx.fillStyle = '#4488cc'; ctx.fillRect(18, 555, 190 * expR, 8);
+            const ebY = spY+80;
+            ctx.fillStyle = '#222'; roundRect(ctx, 18, ebY, 190, 8, 3); ctx.fill();
+            ctx.save(); roundRect(ctx, 18, ebY, 190, 8, 3); ctx.clip();
+            ctx.fillStyle = '#4488cc'; ctx.fillRect(18, ebY, 190 * expR, 8);
             ctx.restore();
-            ctx.strokeStyle = '#444'; ctx.lineWidth = 1; roundRect(ctx, 18, 555, 190, 8, 3); ctx.stroke();
+            ctx.strokeStyle = '#444'; ctx.lineWidth = 1; roundRect(ctx, 18, ebY, 190, 8, 3); ctx.stroke();
             ctx.fillStyle = '#666'; ctx.font = '8px monospace';
-            ctx.fillText(this.player.level >= MAX_LEVEL ? 'MAX' : `${this.player.exp}/${this.player.getExpToNext()} EXP`, 18, 575);
+            ctx.fillText(this.player.level >= MAX_LEVEL ? 'MAX' : `${this.player.exp}/${this.player.getExpToNext()} EXP`, 18, ebY+15);
         }
 
         // === 操作ガイド（最下部固定） ===
         ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '11px monospace'; ctx.textAlign = 'center';
         const taLabel = this.timeAttackMode ? ' [TA:ON]' : '';
-        ctx.fillText(`W/S:Select  Z:Start  T:TimeAtk${taLabel}  I:Inv  C:Craft`, 500, 592);
+        ctx.fillText(`W/S:Select  Z:Start  T:TimeAtk${taLabel}  I:Inv  C:Craft`, this.W/2+100, this.H-8);
         ctx.restore();
     }
     getDifficultyStars(l) { let s='';for(let i=0;i<3;i++)s+=i<l?'\u2605':'\u2606';return s; }
@@ -3131,7 +3134,7 @@ class Game {
         ctx.save(); ctx.globalAlpha = 1;
         // 全画面オーバーレイ
         ctx.fillStyle = '#0d0d1a';
-        ctx.fillRect(0, 0, 800, 600);
+        ctx.fillRect(0,0,this.W,this.H);
         // タイトル
         ctx.fillStyle = '#4488cc'; ctx.font = 'bold 28px monospace'; ctx.textAlign = 'center';
         ctx.fillText('INVENTORY', 400, 40);
@@ -3203,7 +3206,7 @@ class Game {
         ctx.save(); ctx.globalAlpha = 1;
         // 全画面オーバーレイ
         ctx.fillStyle = '#0d0d1a';
-        ctx.fillRect(0, 0, 800, 600);
+        ctx.fillRect(0,0,this.W,this.H);
         // タイトル
         // タブ表示
         const tabNames = ['CRAFT', 'UPGRADE'];
