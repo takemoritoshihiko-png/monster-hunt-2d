@@ -989,8 +989,19 @@ class Monster {
         this.frozenTimer = 0;     // 凍結中タイマー(ms)
         this.frozenDmgMult = 1.2; // 凍結中の被ダメ倍率
         // 毒システム（Poison Dagger用）
-        this.poisonTimer = 0;     // 毒の残り時間(ms)
-        this.poisonTickTimer = 0; // 毒ダメージ間隔タイマー
+        this.poisonTimer = 0;
+        this.poisonTickTimer = 0;
+        // 怒り状態
+        this.enraged = false;
+        this.enrageFlashTimer = 0;
+        // 逃走・巣回復
+        this.nestX = Math.min(WORLD_W - 200, this.spawnX + 600);
+        this.nestY = Math.max(100, this.spawnY - 400);
+        this.recovering = false;
+        this.recoverTimer = 0;
+        // 巡回行動
+        this.patrolTarget = { x: this.spawnX, y: this.spawnY };
+        this.patrolTimer = 0;
     }
     update(dt, player, game) {
         if (!this.alive) return;
@@ -1103,10 +1114,54 @@ class Monster {
                 }
             }
         }
+        // 怒り判定（HP50%以下）
+        if (!this.enraged && this.hp <= this.maxHp * 0.5 && !this.isElder) {
+            this.enraged = true;
+            this.speed = Math.floor(this.baseSpeed * 1.4);
+            this.attackDamage = Math.floor(this.baseAttackDamage * 1.3);
+            if (game) game.damageNumbers.push(new DamageNumber(this.x+this.width/2, this.y-30, 0, '#ff6622', 'ENRAGED!'));
+        }
+        // 怒りフラッシュタイマー
+        if (this.enraged) {
+            this.enrageFlashTimer -= dt * 1000;
+            if (this.enrageFlashTimer <= 0) this.enrageFlashTimer = 500;
+        }
+
+        // 逃走判定（HP20%以下・ボス以外）
+        if (!this.isBoss && this.hp <= this.maxHp * 0.2 && this.hp > 0) {
+            // 巣で回復中
+            const nestDx = this.nestX - this.x, nestDy = this.nestY - this.y;
+            const nestDist = Math.sqrt(nestDx*nestDx + nestDy*nestDy);
+            if (nestDist < 60) {
+                // 巣に到着 → 回復開始
+                this.state = 'recovering';
+                this.recovering = true;
+                this.recoverTimer += dt * 1000;
+                if (this.recoverTimer < 5000) {
+                    this.hp = Math.min(this.maxHp, this.hp + Math.floor(this.maxHp * 0.3 * dt / 5));
+                } else {
+                    this.recovering = false; this.recoverTimer = 0;
+                }
+                // プレイヤーが近いと回復中断
+                if (dist < 200) { this.recovering = false; this.recoverTimer = 0; this.state = 'chase'; }
+                else return;
+            } else {
+                // 巣に向かって逃走
+                this.state = 'flee';
+                const nd = nestDist || 1;
+                this.x += (nestDx/nd) * this.speed * 1.2 * speedMult * dt;
+                this.y += (nestDy/nd) * this.speed * 1.2 * speedMult * dt;
+                return;
+            }
+        }
+        this.recovering = false; this.recoverTimer = 0;
+
+        // ボス突進
         if (this.isBoss&&this.hp<=this.maxHp*0.5&&this.chargeCooldownTimer<=0&&dist<this.aggroRange) {
             this.state='charge_windup'; this.chargeWindupTimer=this.chargeWindupDuration;
             Sound.playChargeWarning(); this.chargeCooldownTimer=this.chargeCooldown; return;
         }
+        // 攻撃
         if (dist<=this.attackRange) {
             this.state='attack';
             if (this.attackTimer<=0) {
@@ -1124,9 +1179,27 @@ class Monster {
                 }
             }
         } else if (dist<=this.aggroRange) {
+            // 追跡
             this.state='chase';
             this.x+=dx/dist*this.speed*speedMult*dt; this.y+=dy/dist*this.speed*speedMult*dt;
-        } else this.state='idle';
+        } else {
+            // 巡回行動
+            this.state='patrol';
+            this.patrolTimer -= dt * 1000;
+            if (this.patrolTimer <= 0) {
+                this.patrolTimer = 15000 + Math.random() * 10000;
+                const angle = Math.random() * Math.PI * 2;
+                const r = 100 + Math.random() * 200;
+                this.patrolTarget.x = Math.max(20, Math.min(WORLD_W-20, this.spawnX + Math.cos(angle)*r));
+                this.patrolTarget.y = Math.max(20, Math.min(WORLD_H-20, this.spawnY + Math.sin(angle)*r));
+            }
+            const pdx = this.patrolTarget.x - this.x, pdy = this.patrolTarget.y - this.y;
+            const pdist = Math.sqrt(pdx*pdx + pdy*pdy);
+            if (pdist > 10) {
+                this.x += pdx/pdist * this.speed * 0.3 * dt;
+                this.y += pdy/pdist * this.speed * 0.3 * dt;
+            }
+        }
     }
     /**
      * @param {number} amount - ダメージ量
@@ -1175,8 +1248,10 @@ class Monster {
         this.x=this.spawnX; this.y=this.spawnY;
         this.attackTimer=0; this.hitFlashTimer=0; this.slowTimer=0;
         this.chargeCooldownTimer=0; this.chargeTimer=0; this.chargeWindupTimer=0;
-        this.phase2=false; this.speed=this.baseSpeed;
+        this.phase2=false; this.speed=this.baseSpeed; this.attackDamage=this.baseAttackDamage;
         this.frostCount=0; this.frozenTimer=0; this.poisonTimer=0; this.poisonTickTimer=0;
+        this.enraged=false; this.enrageFlashTimer=0;
+        this.recovering=false; this.recoverTimer=0; this.patrolTimer=0;
     }
     generateDrops() {
         const drops=[], table=DROP_TABLES[this.dropTableId]; if (!table) return drops;
@@ -1251,6 +1326,32 @@ class Monster {
         } else {
             ctx.fillStyle=this.hitFlashTimer>0?'#fff':(this.state==='charging'?'#ff6633':this.color);
             ctx.fillRect(this.x,this.y,this.width,this.height);
+        }
+        // 怒りフラッシュ
+        if (this.enraged && this.enrageFlashTimer > 250) {
+            ctx.save(); ctx.globalAlpha = 0.2;
+            ctx.fillStyle = '#ff4422';
+            ctx.fillRect(this.x-2, this.y-2, this.width+4, this.height+4);
+            ctx.restore();
+        }
+        // 怒りテキスト
+        if (this.enraged && !this.recovering) {
+            ctx.fillStyle = '#ff6622'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+            ctx.fillText('ENRAGED', this.x+this.width/2, this.y-8);
+        }
+        // 逃走「!」アイコン
+        if (this.state === 'flee') {
+            ctx.fillStyle = '#ffcc00'; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
+            ctx.fillText('!', this.x+this.width/2, this.y-12);
+        }
+        // 回復エフェクト
+        if (this.recovering) {
+            ctx.save(); ctx.globalAlpha = 0.2 + Math.sin(Date.now()*0.006)*0.1;
+            ctx.fillStyle = '#44ff44';
+            ctx.beginPath(); ctx.arc(this.x+this.width/2, this.y+this.height/2, this.width*0.7, 0, Math.PI*2); ctx.fill();
+            ctx.restore();
+            ctx.fillStyle = '#44cc44'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+            ctx.fillText('Recovering...', this.x+this.width/2, this.y-8);
         }
         // 凍結エフェクト
         if (this.frozenTimer > 0) {
@@ -2522,7 +2623,7 @@ class Game {
                 }
                 // 実HP
                 const mRatio = m.hp / m.maxHp;
-                ctx.fillStyle = m.isBoss ? '#cc6622' : '#cc3333';
+                ctx.fillStyle = m.enraged ? '#dd8822' : (m.isBoss ? '#cc6622' : '#cc3333');
                 ctx.fillRect(mBarX, mBarY, mBarW*mRatio, mBarH);
                 ctx.restore();
                 // 枠
