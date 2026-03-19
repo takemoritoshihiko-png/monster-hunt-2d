@@ -1236,45 +1236,99 @@ class Game {
     // 描画処理
     // ========================================
 
+    /**
+     * 描画メインルーター
+     * 各stateに応じて背景→オブジェクト→UIの順で描画する
+     */
     draw() {
         const ctx = this.ctx;
 
-        // ロビー状態（I/Cオーバーレイ無し）
-        if (this.state === 'lobby') {
-            this.drawLobby(ctx);
-            return;
-        }
+        switch (this.state) {
+            case 'lobby':
+                this.drawLobby(ctx);
+                break;
 
-        // インベントリ/クラフトをロビーから開いた場合は
-        // ロビー背景の上にオーバーレイを描画する
-        if ((this.state === 'inventory' || this.state === 'craft') && this._returnToLobby) {
-            this.drawLobby(ctx);
-            if (this.state === 'inventory') {
+            case 'playing':
+                this.drawField(ctx);
+                break;
+
+            case 'inventory':
+                // 背景を描画してからオーバーレイを重ねる
+                if (this._returnToLobby) {
+                    this.drawLobby(ctx);
+                } else {
+                    this.drawField(ctx);
+                }
                 this.drawInventory(ctx);
-            } else {
+                break;
+
+            case 'craft':
+                if (this._returnToLobby) {
+                    this.drawLobby(ctx);
+                } else {
+                    this.drawField(ctx);
+                }
                 this.drawCraftMenu(ctx);
-            }
-            return;
-        }
+                break;
 
-        // フィールド描画（プレイヤー・モンスターが存在する場合のみ）
+            case 'gameover':
+                this.drawField(ctx);
+                this.drawResultScreen(ctx, false);
+                break;
+
+            case 'result':
+                this.drawField(ctx);
+                this.drawResultScreen(ctx, true);
+                break;
+        }
+    }
+
+    /**
+     * フィールド全体の描画（背景+オブジェクト+HUD）
+     * ctx.save()/restore()で状態を保護し、描画漏れを防ぐ
+     */
+    drawField(ctx) {
+        ctx.save();
+        ctx.globalAlpha = 1;
+
         this.drawBackground(ctx);
-        for (const item of this.droppedItems) item.draw(ctx);
-        for (const arrow of this.arrows) arrow.draw(ctx);
-        for (const monster of this.monsters) monster.draw(ctx);
-        if (this.player) this.player.draw(ctx);
-        if (this.player) this.drawUI(ctx);
 
-        // オーバーレイ
-        if (this.state === 'gameover') {
-            this.drawResultScreen(ctx, false);
-        } else if (this.state === 'result') {
-            this.drawResultScreen(ctx, true);
-        } else if (this.state === 'inventory') {
-            this.drawInventory(ctx);
-        } else if (this.state === 'craft') {
-            this.drawCraftMenu(ctx);
+        // ドロップアイテム
+        for (const item of this.droppedItems) {
+            ctx.save();
+            item.draw(ctx);
+            ctx.restore();
         }
+
+        // 矢
+        for (const arrow of this.arrows) {
+            ctx.save();
+            arrow.draw(ctx);
+            ctx.restore();
+        }
+
+        // モンスター
+        for (const monster of this.monsters) {
+            ctx.save();
+            monster.draw(ctx);
+            ctx.restore();
+        }
+
+        // プレイヤー
+        if (this.player) {
+            ctx.save();
+            this.player.draw(ctx);
+            ctx.restore();
+        }
+
+        // HUD（HPバー・装備表示など）
+        if (this.player) {
+            ctx.save();
+            this.drawUI(ctx);
+            ctx.restore();
+        }
+
+        ctx.restore();
     }
 
     drawBackground(ctx) {
@@ -1295,6 +1349,8 @@ class Game {
     // ロビー画面描画
     // ========================================
     drawLobby(ctx) {
+        ctx.save();
+        ctx.globalAlpha = 1;
         // 背景
         ctx.fillStyle = '#0e0e1a';
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -1397,6 +1453,7 @@ class Game {
         ctx.font = '13px monospace';
         ctx.textAlign = 'center';
         ctx.fillText('W/S:Select  Z/Enter/Click:Start  I:Inventory  C:Craft', 400, 580);
+        ctx.restore();
     }
 
     /**
@@ -1532,6 +1589,8 @@ class Game {
     // クエスト結果画面描画
     // ========================================
     drawResultScreen(ctx, success) {
+        ctx.save();
+        ctx.globalAlpha = 1;
         ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
@@ -1579,12 +1638,15 @@ class Game {
         ctx.textAlign = 'center';
         const remaining = Math.max(0, Math.ceil(this.resultTimer));
         ctx.fillText(`Returning to lobby in ${remaining}s  (R: now)`, centerX, centerY + 80);
+        ctx.restore();
     }
 
     // ========================================
     // インベントリ画面描画
     // ========================================
     drawInventory(ctx) {
+        ctx.save();
+        ctx.globalAlpha = 1;
         ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
@@ -1691,12 +1753,15 @@ class Game {
         ctx.font = '14px monospace';
         ctx.textAlign = 'center';
         ctx.fillText('Press I to close', this.canvas.width / 2, panelY + panelH - 20);
+        ctx.restore();
     }
 
     // ========================================
     // クラフト画面描画
     // ========================================
     drawCraftMenu(ctx) {
+        ctx.save();
+        ctx.globalAlpha = 1;
         ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
@@ -1788,6 +1853,7 @@ class Game {
         ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
         ctx.font = '14px monospace'; ctx.textAlign = 'center';
         ctx.fillText('W/S:Select  Z:Craft  C:Close', this.canvas.width / 2, panelY + panelH - 20);
+        ctx.restore();
     }
 }
 
