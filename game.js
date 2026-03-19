@@ -264,16 +264,32 @@ const DROP_TABLES = {
     ],
 };
 
-// 木の配置データ（フィールド端に8本）
+// ワールドサイズ
+const WORLD_W = 2400, WORLD_H = 1800;
+
+// エリア定義（座標とタイプ）
+const AREAS = [
+    { name: 'grassland', color: '#2d5a27', x: 0, y: 600, w: 2400, h: 600 },        // 中央草原
+    { name: 'forest',    color: '#1a3a18', x: 0, y: 0,   w: 2400, h: 600 },        // 北の森
+    { name: 'rocks',     color: '#4a4a50', x: 1600, y: 600, w: 800, h: 600 },      // 東の岩場
+    { name: 'swamp',     color: '#1a3a30', x: 0, y: 1200, w: 2400, h: 600 },       // 南の沼
+];
+
+// 木の配置データ（ワールド全体に配置）
 const TREES = [
-    { x: 50,  y: 80 },
-    { x: 730, y: 60 },
-    { x: 40,  y: 350 },
-    { x: 750, y: 320 },
-    { x: 180, y: 50 },
-    { x: 600, y: 40 },
-    { x: 100, y: 520 },
-    { x: 680, y: 510 },
+    // 草原周辺
+    { x: 150, y: 700 }, { x: 400, y: 650 }, { x: 900, y: 750 }, { x: 1200, y: 680 },
+    { x: 1500, y: 800 }, { x: 300, y: 1100 }, { x: 800, y: 1050 }, { x: 1100, y: 1150 },
+    // 北の森（密）
+    { x: 100, y: 100 }, { x: 250, y: 200 }, { x: 400, y: 80 }, { x: 550, y: 250 },
+    { x: 700, y: 150 }, { x: 850, y: 300 }, { x: 1000, y: 120 }, { x: 1150, y: 280 },
+    { x: 1300, y: 180 }, { x: 1500, y: 350 }, { x: 1700, y: 200 }, { x: 1900, y: 300 },
+    { x: 200, y: 400 }, { x: 500, y: 450 }, { x: 800, y: 500 }, { x: 1100, y: 420 },
+    { x: 1400, y: 500 }, { x: 1700, y: 450 }, { x: 2000, y: 380 }, { x: 2200, y: 250 },
+    // 東岩場に少し
+    { x: 1800, y: 700 }, { x: 2100, y: 850 },
+    // 南沼周辺
+    { x: 200, y: 1350 }, { x: 600, y: 1400 }, { x: 1000, y: 1300 }, { x: 1400, y: 1450 },
 ];
 const TREE_TRUNK_R = 12;
 const TREE_CANOPY_R = 28;
@@ -285,7 +301,7 @@ const QUESTS = [
         description: 'Forest Drakeを1体討伐せよ', difficulty: 1,
         rewards: [{ materialId: 'drakeScale', count: 3 }],
         monsters: [{
-            name: 'Forest Drake', x: 400 - 32, y: 220,
+            name: 'Forest Drake', x: 1150, y: 750,
             config: { hp: 500, width: 64, height: 64, speed: 80, color: '#cc3333',
                       attackDamage: 6, attackRange: 55, attackCooldown: 1500,
                       aggroRange: 400, dropTableId: 'forestDrake' },
@@ -296,11 +312,11 @@ const QUESTS = [
         description: 'Forest Drake 2体を同時に討伐せよ', difficulty: 2,
         rewards: [{ materialId: 'drakeFang', count: 3 }, { materialId: 'drakeCore', count: 1 }],
         monsters: [
-            { name: 'Forest Drake', x: 250, y: 180,
+            { name: 'Forest Drake', x: 900, y: 700,
               config: { hp: 500, width: 64, height: 64, speed: 80, color: '#cc3333',
                         attackDamage: 6, attackRange: 55, attackCooldown: 1500,
                         aggroRange: 400, dropTableId: 'forestDrake' } },
-            { name: 'Forest Drake', x: 500, y: 250,
+            { name: 'Forest Drake', x: 1400, y: 800,
               config: { hp: 500, width: 64, height: 64, speed: 85, color: '#dd4444',
                         attackDamage: 6, attackRange: 55, attackCooldown: 1500,
                         aggroRange: 400, dropTableId: 'forestDrake' } },
@@ -311,7 +327,7 @@ const QUESTS = [
         description: '素早い氷の狼を討伐せよ', difficulty: 2,
         rewards: [{ materialId: 'iceFang', count: 2 }],
         monsters: [{
-            name: 'Ice Wolf', x: 400 - 24, y: 230,
+            name: 'Ice Wolf', x: 1150, y: 700,
             config: { hp: 300, width: 48, height: 48, speed: 120, color: '#88ccee',
                       attackDamage: 8, attackRange: 45, attackCooldown: 1200,
                       aggroRange: 400, dropTableId: 'iceWolf', isIceWolf: true },
@@ -322,7 +338,7 @@ const QUESTS = [
         description: 'HP1500の巨大ドレイクを討伐せよ', difficulty: 3,
         rewards: [{ materialId: 'drakeCore', count: 3 }],
         monsters: [{
-            name: 'Giant Drake', x: 400 - 48, y: 200,
+            name: 'Giant Drake', x: 1100, y: 700,
             config: { hp: 1500, width: 96, height: 96, speed: 70, color: '#882222',
                       attackDamage: 13, attackRange: 70, attackCooldown: 1000,
                       aggroRange: 350, dropTableId: 'giantDrake', isBoss: true },
@@ -334,7 +350,7 @@ const QUESTS = [
         rewards: [{ materialId: 'elderScale', count: 5 }],
         unlockCondition: 'allClear+lv5',
         monsters: [{
-            name: 'Elder Drake', x: 400 - 48, y: 180,
+            name: 'Elder Drake', x: 1100, y: 650,
             config: { hp: 3000, width: 96, height: 96, speed: 100, color: '#220022',
                       attackDamage: 25, attackRange: 75, attackCooldown: 800,
                       aggroRange: 450, dropTableId: 'giantDrake', isBoss: true, isElder: true },
@@ -347,11 +363,11 @@ const QUESTS = [
         rewards: [{ materialId: 'elderScale', count: 8 }],
         timeLimit: 600,
         monsters: [
-            { name: 'Elder Drake', x: 300, y: 180,
+            { name: 'Elder Drake', x: 900, y: 650,
               config: { hp: 3000, width: 96, height: 96, speed: 100, color: '#220022',
                         attackDamage: 25, attackRange: 75, attackCooldown: 800,
                         aggroRange: 450, dropTableId: 'giantDrake', isBoss: true, isElder: true } },
-            { name: 'Giant Drake', x: 500, y: 250,
+            { name: 'Giant Drake', x: 1400, y: 800,
               config: { hp: 1500, width: 96, height: 96, speed: 70, color: '#882222',
                         attackDamage: 13, attackRange: 70, attackCooldown: 1000,
                         aggroRange: 350, dropTableId: 'giantDrake', isBoss: true } },
@@ -491,7 +507,7 @@ class Arrow {
         const mx = this.vx*this.speed*dt, my = this.vy*this.speed*dt;
         this.x += mx; this.y += my;
         this.traveled += Math.sqrt(mx*mx+my*my);
-        if (this.x<-10||this.x>cw+10||this.y<-10||this.y>ch+10||this.traveled>this.maxDistance) this.alive=false;
+        if (this.x<-10||this.x>WORLD_W+10||this.y<-10||this.y>WORLD_H+10||this.traveled>this.maxDistance) this.alive=false;
     }
     draw(ctx) {
         if (!this.alive) return;
@@ -721,8 +737,13 @@ class Player {
         if (canMoveX) this.x = newX;
         if (canMoveY) this.y = newY;
 
-        this.x = Math.max(0, Math.min(cw-this.width, this.x));
-        this.y = Math.max(0, Math.min(ch-this.height, this.y));
+        // ワールド端でクランプ（壁8px分）
+        this.x = Math.max(10, Math.min(WORLD_W-this.width-10, this.x));
+        this.y = Math.max(10, Math.min(WORLD_H-this.height-10, this.y));
+        // エリア別移動速度修正
+        const pcY = this.y + this.height/2, pcX = this.x + this.width/2;
+        if (pcX > 1600 && pcY > 600 && pcY < 1200) this.speed = Math.floor(this.speed * 0.8); // 岩場-20%
+        if (pcY > 1200) this.speed = Math.floor(this.speed * 0.7); // 沼-30%
         if (this.attackCooldown>0) this.attackCooldown -= dt*1000;
         if (this.attackTimer>0) { this.attackTimer -= dt*1000; if (this.attackTimer<=0) this.isAttacking=false; }
         if (this.invincibleTimer>0) this.invincibleTimer -= dt*1000;
@@ -1037,8 +1058,8 @@ class Monster {
             this.chargeTimer-=dt*1000;
             this.x+=this.chargeDir.x*this.chargeSpeed*dt;
             this.y+=this.chargeDir.y*this.chargeSpeed*dt;
-            this.x=Math.max(0,Math.min(800-this.width,this.x));
-            this.y=Math.max(0,Math.min(600-this.height,this.y));
+            this.x=Math.max(10,Math.min(WORLD_W-this.width-10,this.x));
+            this.y=Math.max(10,Math.min(WORLD_H-this.height-10,this.y));
             if (!this.chargeHitDealt) {
                 const cd=Math.sqrt(((player.x+player.width/2)-(this.x+this.width/2))**2+((player.y+player.height/2)-(this.y+this.height/2))**2);
                 if (cd<this.width/2+player.width/2) { player.takeDamage(this.chargeDamage); this.chargeHitDealt=true; }
@@ -1333,6 +1354,9 @@ class Game {
         try { const bt = localStorage.getItem('mh2d_bestTimes'); if (bt) this.inventory.bestTimes = JSON.parse(bt); } catch(e){}
         this.images = {}; this.imagesLoaded = false;
 
+        // カメラ
+        this.camera = { x: 0, y: 0 };
+
         // カメラシェイク
         this.shakeTimer = 0; this.shakeIntensity = 0;
 
@@ -1377,47 +1401,51 @@ class Game {
      */
     generateGrassTexture() {
         const gc = document.createElement('canvas');
-        gc.width = 800; gc.height = 600;
-        const gctx = gc.getContext('2d');
-        // ベース色
-        gctx.fillStyle = '#2d5a27';
-        gctx.fillRect(0, 0, 800, 600);
-        // 微妙な色変化タイル
-        for (let y=0; y<600; y+=32) {
-            for (let x=0; x<800; x+=32) {
-                if ((x/32+y/32)%2===0) { gctx.fillStyle='rgba(0,0,0,0.04)'; gctx.fillRect(x,y,32,32); }
-                else { gctx.fillStyle='rgba(50,100,30,0.06)'; gctx.fillRect(x,y,32,32); }
+        gc.width = WORLD_W; gc.height = WORLD_H;
+        const g = gc.getContext('2d');
+        // エリア別ベースカラー
+        for (const area of AREAS) { g.fillStyle = area.color; g.fillRect(area.x, area.y, area.w, area.h); }
+        // チェッカータイル
+        for (let y = 0; y < WORLD_H; y += 32) {
+            for (let x = 0; x < WORLD_W; x += 32) {
+                if ((x/32+y/32)%2===0) { g.fillStyle='rgba(0,0,0,0.03)'; g.fillRect(x,y,32,32); }
             }
         }
-        // ランダムな草の線（シード固定）
+        // 岩場テクスチャ
         const rng = new SeededRandom(42);
-        gctx.strokeStyle = '#3a7830';
-        gctx.lineWidth = 1;
-        for (let i=0; i<300; i++) {
-            const x = rng.next()*800, y = rng.next()*600;
-            const h = 4 + rng.next()*6;
-            const lean = (rng.next()-0.5)*4;
-            const green = Math.floor(80+rng.next()*60);
-            gctx.strokeStyle = `rgb(${30+Math.floor(rng.next()*30)},${green},${20+Math.floor(rng.next()*20)})`;
-            gctx.beginPath(); gctx.moveTo(x, y); gctx.lineTo(x+lean, y-h); gctx.stroke();
+        for (let i=0; i<40; i++) {
+            const rx=1600+rng.next()*800, ry=600+rng.next()*600, rs=8+rng.next()*20;
+            g.fillStyle=`rgba(${80+Math.floor(rng.next()*40)},${80+Math.floor(rng.next()*30)},${85+Math.floor(rng.next()*30)},0.5)`;
+            g.beginPath(); g.arc(rx,ry,rs,0,Math.PI*2); g.fill();
         }
+        // 沼の水たまり
+        for (let i=0; i<30; i++) {
+            const sx=rng.next()*2400, sy=1200+rng.next()*600, sr=15+rng.next()*30;
+            g.fillStyle=`rgba(20,${60+Math.floor(rng.next()*40)},${50+Math.floor(rng.next()*30)},0.3)`;
+            g.beginPath(); g.ellipse(sx,sy,sr,sr*0.6,0,0,Math.PI*2); g.fill();
+        }
+        // 草テクスチャ
+        g.lineWidth=1;
+        for (let i=0; i<800; i++) {
+            const x=rng.next()*WORLD_W, y=rng.next()*1200;
+            const h=4+rng.next()*6, lean=(rng.next()-0.5)*4;
+            const green=Math.floor(80+rng.next()*60);
+            const dark = y<600?0.7:1.0;
+            g.strokeStyle=`rgb(${Math.floor((30+rng.next()*30)*dark)},${Math.floor(green*dark)},${Math.floor((20+rng.next()*20)*dark)})`;
+            g.beginPath(); g.moveTo(x,y); g.lineTo(x+lean,y-h); g.stroke();
+        }
+        // マップ端の壁
+        g.fillStyle='#333340';
+        g.fillRect(0,0,WORLD_W,8); g.fillRect(0,WORLD_H-8,WORLD_W,8);
+        g.fillRect(0,0,8,WORLD_H); g.fillRect(WORLD_W-8,0,8,WORLD_H);
         // 木を描画
         for (const tree of TREES) {
-            // 影
-            gctx.fillStyle = 'rgba(0,0,0,0.15)';
-            gctx.beginPath(); gctx.ellipse(tree.x+3, tree.y+TREE_CANOPY_R-2, TREE_CANOPY_R, TREE_CANOPY_R*0.4, 0, 0, Math.PI*2); gctx.fill();
-            // 幹
-            gctx.fillStyle = '#5a3a1a';
-            gctx.beginPath(); gctx.arc(tree.x, tree.y+10, TREE_TRUNK_R, 0, Math.PI*2); gctx.fill();
-            gctx.fillStyle = '#4a2a10';
-            gctx.beginPath(); gctx.arc(tree.x-3, tree.y+8, TREE_TRUNK_R*0.4, 0, Math.PI*2); gctx.fill();
-            // 葉
-            gctx.fillStyle = '#1a6a20';
-            gctx.beginPath(); gctx.arc(tree.x, tree.y-12, TREE_CANOPY_R, 0, Math.PI*2); gctx.fill();
-            gctx.fillStyle = '#2a8a30';
-            gctx.beginPath(); gctx.arc(tree.x-8, tree.y-16, TREE_CANOPY_R*0.7, 0, Math.PI*2); gctx.fill();
-            gctx.fillStyle = '#1d7a25';
-            gctx.beginPath(); gctx.arc(tree.x+10, tree.y-8, TREE_CANOPY_R*0.6, 0, Math.PI*2); gctx.fill();
+            g.fillStyle='rgba(0,0,0,0.15)';
+            g.beginPath(); g.ellipse(tree.x+3,tree.y+TREE_CANOPY_R-2,TREE_CANOPY_R,TREE_CANOPY_R*0.4,0,0,Math.PI*2); g.fill();
+            g.fillStyle='#5a3a1a'; g.beginPath(); g.arc(tree.x,tree.y+10,TREE_TRUNK_R,0,Math.PI*2); g.fill();
+            g.fillStyle='#1a6a20'; g.beginPath(); g.arc(tree.x,tree.y-12,TREE_CANOPY_R,0,Math.PI*2); g.fill();
+            g.fillStyle='#2a8a30'; g.beginPath(); g.arc(tree.x-8,tree.y-16,TREE_CANOPY_R*0.7,0,Math.PI*2); g.fill();
+            g.fillStyle='#1d7a25'; g.beginPath(); g.arc(tree.x+10,tree.y-8,TREE_CANOPY_R*0.6,0,Math.PI*2); g.fill();
         }
         this.grassCanvas = gc;
     }
@@ -1602,7 +1630,7 @@ class Game {
 
     startQuest(quest) {
         this.currentQuest = quest;
-        this.player = new Player(this.canvas.width/2-16, this.canvas.height-80, this.inventory);
+        this.player = new Player(WORLD_W/2-16, WORLD_H/2+200, this.inventory);
         this.applyLoadedStats(this.player);
         this.monsters = quest.monsters.map(m=>new Monster(m.name,m.x,m.y,m.config));
         this.droppedItems=[]; this.arrows=[]; this.particles=[]; this.iceBreaths=[]; this.damageNumbers=[];
@@ -2133,7 +2161,12 @@ class Game {
             this.resultTimer=this.resultDuration; this.resultAnimTimer=0;
             this.state='gameover'; return;
         }
-        this.player.update(dt, this.keys, this.canvas.width, this.canvas.height, TREES);
+        this.player.update(dt, this.keys, WORLD_W, WORLD_H, TREES);
+        // カメラ追従
+        this.camera.x = this.player.x + this.player.width/2 - this.canvas.width/2;
+        this.camera.y = this.player.y + this.player.height/2 - this.canvas.height/2;
+        this.camera.x = Math.max(0, Math.min(WORLD_W - this.canvas.width, this.camera.x));
+        this.camera.y = Math.max(0, Math.min(WORLD_H - this.canvas.height, this.camera.y));
         // Frost Blade 2連撃目のヒット判定
         if (this.player._frostSecondHitReady) {
             this.player._frostSecondHitReady = false;
@@ -2291,10 +2324,20 @@ class Game {
     }
 
     drawField(ctx) {
-        ctx.save(); ctx.globalAlpha=1;
-        // プリレンダリングされた草原を描画
-        if (this.grassCanvas) ctx.drawImage(this.grassCanvas, 0, 0);
-        else this.drawBackground(ctx);
+        ctx.save(); ctx.globalAlpha = 1;
+
+        // === ワールド空間描画（カメラオフセット適用） ===
+        ctx.save();
+        ctx.translate(-this.camera.x, -this.camera.y);
+
+        // マップ背景（カメラ範囲のみ描画）
+        if (this.grassCanvas) {
+            ctx.drawImage(this.grassCanvas,
+                this.camera.x, this.camera.y, 800, 600,
+                this.camera.x, this.camera.y, 800, 600);
+        } else {
+            ctx.fillStyle = '#2d5a27'; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+        }
 
         for (const item of this.droppedItems) { ctx.save(); item.draw(ctx); ctx.restore(); }
         for (const arrow of this.arrows) { ctx.save(); arrow.draw(ctx); ctx.restore(); }
@@ -2304,33 +2347,41 @@ class Game {
             m.draw(ctx, mImg);
             ctx.restore();
         }
-        if (this.player) { ctx.save(); this.player.draw(ctx,this.images.player); ctx.restore(); }
-        // 氷の息描画
+        if (this.player) { ctx.save(); this.player.draw(ctx, this.images.player); ctx.restore(); }
+        // 氷の息
         for (const ib of this.iceBreaths) {
             if (!ib.alive) continue;
             ctx.save();
-            ctx.fillStyle = '#88ddff';
-            ctx.globalAlpha = 0.8;
-            ctx.beginPath(); ctx.arc(ib.x, ib.y, 8, 0, Math.PI*2); ctx.fill();
-            ctx.fillStyle = '#aaeeff';
-            ctx.globalAlpha = 0.4;
-            ctx.beginPath(); ctx.arc(ib.x, ib.y, 12, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#88ddff'; ctx.globalAlpha = 0.8;
+            ctx.beginPath(); ctx.arc(ib.x, ib.y, 8, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#aaeeff'; ctx.globalAlpha = 0.4;
+            ctx.beginPath(); ctx.arc(ib.x, ib.y, 12, 0, Math.PI * 2); ctx.fill();
             ctx.restore();
         }
-        // パーティクル
+        // パーティクル・ダメージ数値（ワールド空間）
         for (const p of this.particles) { ctx.save(); p.draw(ctx); ctx.restore(); }
-        // ダメージ数値
         for (const dn of this.damageNumbers) { ctx.save(); dn.draw(ctx); ctx.restore(); }
+        // プレイヤースロー
+        if (this.player && this.player.slowTimer > 0) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(100,200,255,0.4)'; ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(this.player.x + this.player.width / 2, this.player.y + this.player.height / 2, 24, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        }
+        ctx.restore(); // カメラオフセット終了
+
+        // === スクリーン空間描画（カメラ影響なし） ===
         // レベルアップテキスト
         if (this.levelUpTimer > 0) {
             ctx.save();
-            const a = Math.min(1, this.levelUpTimer / 500);
-            ctx.globalAlpha = a;
+            ctx.globalAlpha = Math.min(1, this.levelUpTimer / 500);
             ctx.fillStyle = '#ffcc00'; ctx.font = 'bold 32px monospace'; ctx.textAlign = 'center';
             ctx.fillText(`LEVEL UP! Lv${this.player.level}`, 400, 200);
             ctx.restore();
         }
-        // Giant Drake第2形態: 画面端赤エフェクト
+        // ボス第2形態 赤ビネット
         const bossPhase2 = this.monsters.find(m => m.isBoss && m.alive && m.phase2);
         if (bossPhase2) {
             ctx.save();
@@ -2338,25 +2389,12 @@ class Game {
             const g = ctx.createRadialGradient(400, 300, 200, 400, 300, 450);
             g.addColorStop(0, 'rgba(0,0,0,0)');
             g.addColorStop(1, `rgba(150,0,0,${pa})`);
-            ctx.fillStyle = g;
-            ctx.fillRect(0, 0, 800, 600);
+            ctx.fillStyle = g; ctx.fillRect(0, 0, 800, 600);
             ctx.restore();
         }
-        // プレイヤースロー表示
-        if (this.player && this.player.slowTimer > 0) {
-            ctx.save();
-            ctx.strokeStyle = 'rgba(100,200,255,0.4)'; ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(this.player.x+this.player.width/2, this.player.y+this.player.height/2, 24, 0, Math.PI*2);
-            ctx.stroke();
-            ctx.restore();
-        }
+        // HUD
         if (this.player) { ctx.save(); this.drawUI(ctx); ctx.restore(); }
         ctx.restore();
-    }
-
-    drawBackground(ctx) {
-        ctx.fillStyle='#2d5a27'; ctx.fillRect(0,0,800,600);
     }
 
     // ========================================
@@ -2728,34 +2766,52 @@ class Game {
     // ミニマップ描画
     // ========================================
     drawMinimap(ctx) {
-        const mmW = 150, mmH = 100;
+        const mmW = 150, mmH = 112;
         const mmX = this.canvas.width - mmW - 10, mmY = 10;
-        const scaleX = mmW / 800, scaleY = mmH / 600;
+        const scaleX = mmW / WORLD_W, scaleY = mmH / WORLD_H;
         ctx.save();
-        // 背景
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        // 背景（エリア色分け）
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
         roundRect(ctx, mmX, mmY, mmW, mmH, 4); ctx.fill();
+        // エリア色
+        ctx.save();
+        roundRect(ctx, mmX, mmY, mmW, mmH, 4); ctx.clip();
+        for (const area of AREAS) {
+            ctx.fillStyle = area.color; ctx.globalAlpha = 0.4;
+            ctx.fillRect(mmX + area.x * scaleX, mmY + area.y * scaleY, area.w * scaleX, area.h * scaleY);
+        }
+        ctx.globalAlpha = 1;
+        ctx.restore();
+        // 枠
         ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1;
         roundRect(ctx, mmX, mmY, mmW, mmH, 4); ctx.stroke();
-        // 木（緑の小四角）
+        // 木（緑の小点）
         ctx.fillStyle = '#2a6a2a';
         for (const tree of TREES) {
-            ctx.fillRect(mmX + tree.x * scaleX - 2, mmY + tree.y * scaleY - 2, 4, 4);
+            ctx.fillRect(mmX + tree.x * scaleX - 1, mmY + tree.y * scaleY - 1, 2, 2);
         }
+        // カメラ表示範囲（白枠）
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1;
+        ctx.strokeRect(
+            mmX + this.camera.x * scaleX,
+            mmY + this.camera.y * scaleY,
+            800 * scaleX,
+            600 * scaleY
+        );
         // モンスター（赤い点）
         for (const m of this.monsters) {
             if (!m.alive) continue;
             ctx.fillStyle = m.isBoss ? '#ff6622' : '#ff3333';
-            const mx = mmX + (m.x + m.width/2) * scaleX;
-            const my = mmY + (m.y + m.height/2) * scaleY;
-            ctx.beginPath(); ctx.arc(mx, my, m.isBoss ? 4 : 3, 0, Math.PI*2); ctx.fill();
+            const mx = mmX + (m.x + m.width / 2) * scaleX;
+            const my = mmY + (m.y + m.height / 2) * scaleY;
+            ctx.beginPath(); ctx.arc(mx, my, m.isBoss ? 3 : 2, 0, Math.PI * 2); ctx.fill();
         }
         // プレイヤー（白い点）
         if (this.player) {
             ctx.fillStyle = '#ffffff';
-            const px = mmX + (this.player.x + this.player.width/2) * scaleX;
-            const py = mmY + (this.player.y + this.player.height/2) * scaleY;
-            ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill();
+            const px = mmX + (this.player.x + this.player.width / 2) * scaleX;
+            const py = mmY + (this.player.y + this.player.height / 2) * scaleY;
+            ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fill();
         }
         ctx.restore();
     }
