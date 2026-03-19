@@ -189,7 +189,7 @@ const QUESTS = [
         monsters: [{
             name: 'Forest Drake', x: 400 - 32, y: 220,
             config: { hp: 500, width: 64, height: 64, speed: 80, color: '#cc3333',
-                      attackDamage: 10, attackRange: 55, attackCooldown: 1000,
+                      attackDamage: 6, attackRange: 55, attackCooldown: 1500,
                       aggroRange: 400, dropTableId: 'forestDrake' },
         }],
     },
@@ -200,11 +200,11 @@ const QUESTS = [
         monsters: [
             { name: 'Forest Drake', x: 250, y: 180,
               config: { hp: 500, width: 64, height: 64, speed: 80, color: '#cc3333',
-                        attackDamage: 10, attackRange: 55, attackCooldown: 1000,
+                        attackDamage: 6, attackRange: 55, attackCooldown: 1500,
                         aggroRange: 400, dropTableId: 'forestDrake' } },
             { name: 'Forest Drake', x: 500, y: 250,
               config: { hp: 500, width: 64, height: 64, speed: 85, color: '#dd4444',
-                        attackDamage: 10, attackRange: 55, attackCooldown: 1000,
+                        attackDamage: 6, attackRange: 55, attackCooldown: 1500,
                         aggroRange: 400, dropTableId: 'forestDrake' } },
         ],
     },
@@ -215,7 +215,7 @@ const QUESTS = [
         monsters: [{
             name: 'Giant Drake', x: 400 - 48, y: 200,
             config: { hp: 1500, width: 96, height: 96, speed: 70, color: '#882222',
-                      attackDamage: 20, attackRange: 70, attackCooldown: 1000,
+                      attackDamage: 13, attackRange: 70, attackCooldown: 1000,
                       aggroRange: 350, dropTableId: 'giantDrake', isBoss: true },
         }],
     },
@@ -515,7 +515,7 @@ class Monster {
         this.isBoss=config.isBoss||false;
         this.chargeWindupTimer=0; this.chargeWindupDuration=500;
         this.chargeDuration=600; this.chargeTimer=0;
-        this.chargeSpeed=350; this.chargeDamage=30;
+        this.chargeSpeed=350; this.chargeDamage=20;
         this.chargeCooldown=5000; this.chargeCooldownTimer=0;
         this.chargeDir={x:0,y:0}; this.chargeHitDealt=false;
     }
