@@ -155,6 +155,8 @@ const MATERIALS = {
     drakeScale: { id: 'drakeScale', name: 'Drake Scale', color: '#44cc88', description: 'ドレイクの鱗' },
     drakeFang:  { id: 'drakeFang',  name: 'Drake Fang',  color: '#cccc44', description: 'ドレイクの牙' },
     drakeCore:  { id: 'drakeCore',  name: 'Drake Core',  color: '#cc44cc', description: 'ドレイクの核' },
+    iceFang:    { id: 'iceFang',    name: 'Ice Fang',    color: '#66ccee', description: '氷の牙' },
+    iceCrystal: { id: 'iceCrystal', name: 'Ice Crystal', color: '#aaeeff', description: '氷の結晶' },
 };
 
 const DROP_TABLES = {
@@ -164,6 +166,10 @@ const DROP_TABLES = {
         { materialId: 'drakeCore',  chance: 0.2, minCount: 1, maxCount: 1 },
     ],
     giantDrake: [],
+    iceWolf: [
+        { materialId: 'iceFang',    chance: 0.6, minCount: 1, maxCount: 2 },
+        { materialId: 'iceCrystal', chance: 0.3, minCount: 1, maxCount: 1 },
+    ],
 };
 
 // 木の配置データ（フィールド端に8本）
@@ -209,6 +215,17 @@ const QUESTS = [
         ],
     },
     {
+        id: 'iceWolf', name: 'Ice Wolf討伐',
+        description: '素早い氷の狼を討伐せよ', difficulty: 2,
+        rewards: [{ materialId: 'iceFang', count: 2 }],
+        monsters: [{
+            name: 'Ice Wolf', x: 400 - 24, y: 230,
+            config: { hp: 300, width: 48, height: 48, speed: 120, color: '#88ccee',
+                      attackDamage: 8, attackRange: 45, attackCooldown: 1200,
+                      aggroRange: 400, dropTableId: 'iceWolf', isIceWolf: true },
+        }],
+    },
+    {
         id: 'giantDrake', name: 'Giant Drake討伐',
         description: 'HP1500の巨大ドレイクを討伐せよ', difficulty: 3,
         rewards: [{ materialId: 'drakeCore', count: 3 }],
@@ -222,15 +239,18 @@ const QUESTS = [
 ];
 
 class Weapon {
-    constructor(name, damage, range, cooldown, knockback = 0, type = 'melee') {
+    constructor(name, damage, range, cooldown, knockback = 0, type = 'melee', special = null) {
         this.name = name; this.damage = damage; this.range = range;
         this.cooldown = cooldown; this.knockback = knockback; this.type = type;
+        this.special = special; // 'slow' | 'pierce' | null
     }
 }
 const WEAPONS = {
     basicSword: new Weapon('Basic Sword', 15, 40, 350, 3, 'melee'),
     ironSword:  new Weapon('Iron Sword',  30, 50, 400, 5, 'melee'),
     hunterBow:  new Weapon('Hunter Bow',  20, 300, 600, 0, 'ranged'),
+    frostBlade: new Weapon('Frost Blade', 35, 50, 400, 5, 'melee', 'slow'),
+    iceBow:     new Weapon('Ice Bow',     25, 350, 550, 0, 'ranged', 'pierce'),
 };
 
 class Armor {
@@ -250,6 +270,12 @@ const RECIPES = [
     { id: 'drakeArmor', name: 'Drake Armor', description: '被ダメージ x0.7（防御力+20）',
       resultType: 'armor', resultId: 'drakeArmor',
       materials: [{ materialId: 'drakeScale', count: 5 }, { materialId: 'drakeCore', count: 1 }] },
+    { id: 'frostBlade', name: 'Frost Blade', description: '近距離・DMG35・攻撃時に敵減速',
+      resultType: 'weapon', resultId: 'frostBlade',
+      materials: [{ materialId: 'iceFang', count: 2 }, { materialId: 'drakeScale', count: 1 }] },
+    { id: 'iceBow', name: 'Ice Bow', description: '遠距離・DMG25・射程350・貫通',
+      resultType: 'weapon', resultId: 'iceBow',
+      materials: [{ materialId: 'iceCrystal', count: 2 }, { materialId: 'drakeFang', count: 1 }] },
 ];
 
 // ========================================
@@ -309,10 +335,12 @@ class DroppedItem {
 }
 
 class Arrow {
-    constructor(x, y, direction, damage) {
+    constructor(x, y, direction, damage, pierce = false) {
         this.x = x; this.y = y; this.width = 6; this.height = 6;
-        this.speed = 400; this.damage = damage; this.direction = direction;
-        this.alive = true; this.maxDistance = 350; this.traveled = 0;
+        this.speed = 480; this.damage = damage; this.direction = direction;
+        this.alive = true; this.maxDistance = 400; this.traveled = 0;
+        this.pierce = pierce;      // 貫通するか
+        this.hitIds = new Set();   // 貫通時にヒット済みモンスター追跡
         switch (direction) {
             case 'up': this.vx=0;this.vy=-1;break; case 'down': this.vx=0;this.vy=1;break;
             case 'left': this.vx=-1;this.vy=0;break; case 'right': this.vx=1;this.vy=0;break;
@@ -377,6 +405,9 @@ class Player {
         this.comboTimer = 0;       // コンボ受付時間（ms）
         this.comboWindow = 800;    // 次の攻撃までの受付時間（ms）
         this.comboMultipliers = [1.0, 1.2, 1.5];
+        // スロー効果（Ice Wolfの氷の息）
+        this.slowTimer = 0;
+        this.baseSpeed = this.speed;
     }
     cycleWeapon() {
         const w = this.inventory.weapons;
@@ -420,6 +451,9 @@ class Player {
         if (this.invincibleTimer>0) this.invincibleTimer -= dt*1000;
         // コンボタイマー
         if (this.comboTimer>0) { this.comboTimer -= dt*1000; if (this.comboTimer<=0) this.comboCount=0; }
+        // スロー効果
+        if (this.slowTimer > 0) { this.slowTimer -= dt * 1000; this.speed = Math.floor(this.baseSpeed * 0.5); }
+        else { this.speed = this.baseSpeed; }
         this.equipBestArmor();
     }
     attack() {
@@ -518,12 +552,30 @@ class Monster {
         this.chargeSpeed=350; this.chargeDamage=20;
         this.chargeCooldown=5000; this.chargeCooldownTimer=0;
         this.chargeDir={x:0,y:0}; this.chargeHitDealt=false;
+        // スロー効果（Frost Blade等で付与）
+        this.slowTimer = 0;
+        // Ice Wolf: 氷の息
+        this.isIceWolf = config.isIceWolf || false;
+        this.iceBreathCooldown = 3000; // 3秒ごと
+        this.iceBreathTimer = this.iceBreathCooldown;
+        // Giant Drake 第2形態
+        this.phase2 = false;
     }
-    update(dt, player) {
+    update(dt, player, game) {
         if (!this.alive) return;
         // 遅延HPバー更新
         if (this.displayHp > this.hp) {
             this.displayHp = Math.max(this.hp, this.displayHp - this.maxHp * dt * 0.8);
+        }
+        // スロータイマー
+        if (this.slowTimer > 0) this.slowTimer -= dt * 1000;
+        const speedMult = this.slowTimer > 0 ? 0.5 : 1.0;
+        // Giant Drake 第2形態チェック
+        if (this.isBoss && !this.phase2 && this.hp <= this.maxHp * 0.5) {
+            this.phase2 = true;
+            this.speed = Math.floor(this.baseSpeed * 1.3);
+            this.chargeCooldown = 2500; // 突進頻度2倍
+            this.color = '#331111';     // 黒赤色に変化
         }
         const dx=(player.x+player.width/2)-(this.x+this.width/2);
         const dy=(player.y+player.height/2)-(this.y+this.height/2);
@@ -531,6 +583,18 @@ class Monster {
         if (this.attackTimer>0) this.attackTimer-=dt*1000;
         if (this.hitFlashTimer>0) this.hitFlashTimer-=dt*1000;
         if (this.chargeCooldownTimer>0) this.chargeCooldownTimer-=dt*1000;
+        // Ice Wolf: 氷の息発射
+        if (this.isIceWolf && this.state === 'chase' && game) {
+            this.iceBreathTimer -= dt * 1000;
+            if (this.iceBreathTimer <= 0) {
+                this.iceBreathTimer = this.iceBreathCooldown;
+                const d = dist || 1;
+                game.spawnIceBreath(
+                    this.x + this.width/2, this.y + this.height/2,
+                    dx / d, dy / d
+                );
+            }
+        }
         if (this.state==='charge_windup') {
             this.chargeWindupTimer-=dt*1000;
             if (this.chargeWindupTimer<=0) {
@@ -562,7 +626,7 @@ class Monster {
             if (this.attackTimer<=0) { player.takeDamage(this.attackDamage); this.attackTimer=this.attackCooldown; }
         } else if (dist<=this.aggroRange) {
             this.state='chase';
-            this.x+=dx/dist*this.speed*dt; this.y+=dy/dist*this.speed*dt;
+            this.x+=dx/dist*this.speed*speedMult*dt; this.y+=dy/dist*this.speed*speedMult*dt;
         } else this.state='idle';
     }
     takeDamage(amount, kbx=0, kby=0) {
@@ -574,8 +638,9 @@ class Monster {
     respawn() {
         this.hp=this.maxHp; this.displayHp=this.maxHp; this.alive=true; this.state='idle';
         this.x=this.spawnX; this.y=this.spawnY;
-        this.attackTimer=0; this.hitFlashTimer=0;
+        this.attackTimer=0; this.hitFlashTimer=0; this.slowTimer=0;
         this.chargeCooldownTimer=0; this.chargeTimer=0; this.chargeWindupTimer=0;
+        this.phase2=false; this.speed=this.baseSpeed;
     }
     generateDrops() {
         const drops=[], table=DROP_TABLES[this.dropTableId]; if (!table) return drops;
@@ -590,6 +655,32 @@ class Monster {
     }
     draw(ctx, img) {
         if (!this.alive) return;
+        // Ice Wolf は画像なしで水色四角描画
+        if (this.isIceWolf) {
+            const col = this.hitFlashTimer > 0 ? '#ffffff' : (this.slowTimer > 0 ? '#6699aa' : '#88ccee');
+            ctx.fillStyle = col;
+            ctx.fillRect(this.x, this.y, this.width, this.height);
+            // 目
+            ctx.fillStyle = '#225588';
+            ctx.fillRect(this.x + 8, this.y + 12, 8, 6);
+            ctx.fillRect(this.x + this.width - 16, this.y + 12, 8, 6);
+            ctx.fillStyle = '#112244';
+            ctx.fillRect(this.x + 11, this.y + 14, 3, 3);
+            ctx.fillRect(this.x + this.width - 13, this.y + 14, 3, 3);
+            // 耳
+            ctx.fillStyle = col;
+            ctx.beginPath(); ctx.moveTo(this.x + 4, this.y); ctx.lineTo(this.x - 4, this.y - 12);
+            ctx.lineTo(this.x + 14, this.y); ctx.closePath(); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(this.x + this.width - 14, this.y);
+            ctx.lineTo(this.x + this.width + 4, this.y - 12);
+            ctx.lineTo(this.x + this.width - 4, this.y); ctx.closePath(); ctx.fill();
+            // スロー時の氷エフェクト
+            if (this.slowTimer > 0) {
+                ctx.strokeStyle = 'rgba(100,200,255,0.5)'; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.arc(this.x+this.width/2, this.y+this.height/2, this.width*0.6, 0, Math.PI*2); ctx.stroke();
+            }
+            return;
+        }
         const sw=this.isBoss?144:96, sh=sw;
         const dx=this.x+this.width/2-sw/2, dy=this.y+this.height/2-sh/2;
         if (this.state==='charge_windup') {
@@ -652,6 +743,10 @@ class Game {
         this.titleTimer = 0; // タイトル画面の経過時間
         this.droppedItems = []; this.arrows = []; this.monsters = [];
         this.particles = [];    // パーティクル管理
+        this.iceBreaths = [];   // 氷の息（飛翔体）
+        // ボス登場演出
+        this.bossIntroTimer = 0;
+        this.bossIntroActive = false;
         this.currentQuest = null; this.questRewards = [];
         this.resultTimer = 0; this.resultDuration = 5; this.questSuccess = false;
         this.lobbyCursor = 0; this.craftCursor = 0;
@@ -659,6 +754,14 @@ class Game {
         this.weaponSwitchMessage = ''; this.weaponSwitchTimer = 0;
         this.mouseX = 0; this.mouseY = 0; this._returnToLobby = false;
         this.inventory = new Inventory();
+        // デバッグモード: ?debug=true で初期素材を付与
+        if (new URLSearchParams(window.location.search).get('debug') === 'true') {
+            this.inventory.addMaterial('drakeScale', 10);
+            this.inventory.addMaterial('drakeFang', 5);
+            this.inventory.addMaterial('drakeCore', 3);
+            this.inventory.addMaterial('iceFang', 5);
+            this.inventory.addMaterial('iceCrystal', 3);
+        }
         this.images = {}; this.imagesLoaded = false;
 
         // カメラシェイク
@@ -739,9 +842,17 @@ class Game {
         this.currentQuest = quest;
         this.player = new Player(this.canvas.width/2-16, this.canvas.height-80, this.inventory);
         this.monsters = quest.monsters.map(m=>new Monster(m.name,m.x,m.y,m.config));
-        this.droppedItems=[]; this.arrows=[]; this.particles=[];
+        this.droppedItems=[]; this.arrows=[]; this.particles=[]; this.iceBreaths=[];
         this.questSuccess=false; this.shakeTimer=0; this.resultAnimTimer=0;
-        this.state='playing';
+        // ボス登場演出
+        if (quest.monsters.some(m => m.config.isBoss)) {
+            this.bossIntroActive = true;
+            this.bossIntroTimer = 3;
+            this.state = 'bossIntro';
+        } else {
+            this.bossIntroActive = false;
+            this.state = 'playing';
+        }
     }
 
     /**
@@ -761,6 +872,13 @@ class Game {
                 200 + Math.random()*150, size
             ));
         }
+    }
+
+    /**
+     * Ice Wolfの氷の息を生成
+     */
+    spawnIceBreath(x, y, dirX, dirY) {
+        this.iceBreaths.push({ x, y, vx: dirX * 250, vy: dirY * 250, alive: true, life: 1500 });
     }
 
     /**
@@ -839,7 +957,8 @@ class Game {
         if (this.player.weapon.type==='ranged') {
             this.player.attack();
             const cx=this.player.x+this.player.width/2, cy=this.player.y+this.player.height/2;
-            this.arrows.push(new Arrow(cx,cy,this.player.facing,this.player.weapon.damage));
+            const isPierce = this.player.weapon.special === 'pierce';
+            this.arrows.push(new Arrow(cx,cy,this.player.facing,this.player.weapon.damage, isPierce));
             return;
         }
         const hitbox = this.player.attack(); if (!hitbox) return;
@@ -865,6 +984,10 @@ class Game {
         const comboMult = this.player.getComboMultiplier();
         const dmg = Math.floor(this.player.weapon.damage * comboMult);
         monster.takeDamage(dmg, (dx/dist)*kb*comboMult, (dy/dist)*kb*comboMult);
+        // Frost Bladeのスロー効果
+        if (this.player.weapon.special === 'slow') {
+            monster.slowTimer = 1000; // 1秒間移動速度低下
+        }
         // ヒットパーティクル
         const hx = monster.x+monster.width/2, hy = monster.y+monster.height/2;
         const isFinish = this.player.comboCount === 2;
@@ -875,6 +998,18 @@ class Game {
 
     onMonsterDefeated(monster) {
         this.droppedItems.push(...monster.generateDrops());
+        // Giant Drake討伐時の特別パーティクル
+        if (monster.isBoss) {
+            for (let i = 0; i < 30; i++) {
+                const a = Math.random()*Math.PI*2, sp = 50+Math.random()*150;
+                this.particles.push(new Particle(
+                    monster.x+monster.width/2, monster.y+monster.height/2,
+                    Math.cos(a)*sp, Math.sin(a)*sp-50,
+                    ['#ffcc00','#ffdd44','#ff8800','#ffffff'][Math.floor(Math.random()*4)],
+                    800+Math.random()*800, 3+Math.random()*3
+                ));
+            }
+        }
         if (this.monsters.every(m=>!m.alive)) {
             this.questSuccess=true;
             this.questRewards=this.currentQuest.rewards.map(r=>({...r}));
@@ -924,29 +1059,56 @@ class Game {
             if (this.resultTimer<=0) this.state='lobby';
             return;
         }
+        // ボス登場演出
+        if (this.state === 'bossIntro') {
+            this.bossIntroTimer -= dt;
+            if (this.bossIntroTimer <= 0) { this.state = 'playing'; this.bossIntroActive = false; }
+            return;
+        }
+
         if (this.state!=='playing') return;
 
         this.player.update(dt, this.keys, this.canvas.width, this.canvas.height, TREES);
-        for (const m of this.monsters) if (m.alive) m.update(dt, this.player);
+        for (const m of this.monsters) if (m.alive) m.update(dt, this.player, this);
 
         for (const arrow of this.arrows) {
             arrow.update(dt, this.canvas.width, this.canvas.height);
             if (arrow.alive) {
-                for (const m of this.monsters) {
-                    if (m.alive) {
-                        const ab={x:arrow.x-3,y:arrow.y-3,width:6,height:6};
-                        if (this.checkCollision(ab,m)) {
-                            m.takeDamage(arrow.damage,0,0); arrow.alive=false;
-                            this.spawnHitParticles(arrow.x, arrow.y, 5, false);
-                            Sound.playHit();
-                            if (!m.alive) this.onMonsterDefeated(m);
-                            break;
-                        }
+                for (let mi=0; mi<this.monsters.length; mi++) {
+                    const m = this.monsters[mi];
+                    if (!m.alive) continue;
+                    if (arrow.pierce && arrow.hitIds.has(mi)) continue;
+                    const ab={x:arrow.x-3,y:arrow.y-3,width:6,height:6};
+                    if (this.checkCollision(ab,m)) {
+                        m.takeDamage(arrow.damage,0,0);
+                        this.spawnHitParticles(arrow.x, arrow.y, 5, false);
+                        Sound.playHit();
+                        if (!m.alive) { Sound.playMonsterDie(); this.onMonsterDefeated(m); }
+                        if (arrow.pierce) { arrow.hitIds.add(mi); }
+                        else { arrow.alive=false; break; }
                     }
                 }
             }
         }
         this.arrows=this.arrows.filter(a=>a.alive);
+
+        // 氷の息の更新
+        for (const ib of this.iceBreaths) {
+            ib.x += ib.vx * dt; ib.y += ib.vy * dt;
+            ib.life -= dt * 1000;
+            if (ib.life <= 0 || ib.x < -20 || ib.x > 820 || ib.y < -20 || ib.y > 620) { ib.alive = false; continue; }
+            const pdx = (this.player.x+this.player.width/2) - ib.x;
+            const pdy = (this.player.y+this.player.height/2) - ib.y;
+            if (Math.sqrt(pdx*pdx+pdy*pdy) < 20) {
+                this.player.slowTimer = 2000;
+                ib.alive = false;
+                for (let i=0; i<5; i++) {
+                    const a = Math.random()*Math.PI*2;
+                    this.particles.push(new Particle(ib.x,ib.y,Math.cos(a)*60,Math.sin(a)*60,'#aaeeff',300,2));
+                }
+            }
+        }
+        this.iceBreaths = this.iceBreaths.filter(ib => ib.alive);
 
         for (const item of this.droppedItems) {
             item.update(dt);
@@ -991,6 +1153,7 @@ class Game {
             case 'craft':
                 if (this._returnToLobby) this.drawLobby(ctx); else this.drawField(ctx);
                 this.drawCraftMenu(ctx); break;
+            case 'bossIntro': this.drawBossIntro(ctx); break;
             case 'gameover': this.drawField(ctx); this.drawGameOver(ctx); break;
             case 'result': this.drawField(ctx); this.drawQuestComplete(ctx); break;
         }
@@ -1007,12 +1170,46 @@ class Game {
         for (const arrow of this.arrows) { ctx.save(); arrow.draw(ctx); ctx.restore(); }
         for (const m of this.monsters) {
             ctx.save();
-            m.draw(ctx, m.isBoss?this.images.giantDrake:this.images.forestDrake);
+            const mImg = m.isIceWolf ? null : (m.isBoss ? this.images.giantDrake : this.images.forestDrake);
+            m.draw(ctx, mImg);
             ctx.restore();
         }
         if (this.player) { ctx.save(); this.player.draw(ctx,this.images.player); ctx.restore(); }
+        // 氷の息描画
+        for (const ib of this.iceBreaths) {
+            if (!ib.alive) continue;
+            ctx.save();
+            ctx.fillStyle = '#88ddff';
+            ctx.globalAlpha = 0.8;
+            ctx.beginPath(); ctx.arc(ib.x, ib.y, 8, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#aaeeff';
+            ctx.globalAlpha = 0.4;
+            ctx.beginPath(); ctx.arc(ib.x, ib.y, 12, 0, Math.PI*2); ctx.fill();
+            ctx.restore();
+        }
         // パーティクル
         for (const p of this.particles) { ctx.save(); p.draw(ctx); ctx.restore(); }
+        // Giant Drake第2形態: 画面端赤エフェクト
+        const bossPhase2 = this.monsters.find(m => m.isBoss && m.alive && m.phase2);
+        if (bossPhase2) {
+            ctx.save();
+            const pa = 0.08 + Math.sin(Date.now() * 0.005) * 0.05;
+            const g = ctx.createRadialGradient(400, 300, 200, 400, 300, 450);
+            g.addColorStop(0, 'rgba(0,0,0,0)');
+            g.addColorStop(1, `rgba(150,0,0,${pa})`);
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, 800, 600);
+            ctx.restore();
+        }
+        // プレイヤースロー表示
+        if (this.player && this.player.slowTimer > 0) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(100,200,255,0.4)'; ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(this.player.x+this.player.width/2, this.player.y+this.player.height/2, 24, 0, Math.PI*2);
+            ctx.stroke();
+            ctx.restore();
+        }
         if (this.player) { ctx.save(); this.drawUI(ctx); ctx.restore(); }
         ctx.restore();
     }
@@ -1188,6 +1385,32 @@ class Game {
     // ========================================
     // ロビー / インベントリ / クラフト（Phase 3と同じ）
     // ========================================
+    // ========================================
+    // ボス登場演出
+    // ========================================
+    drawBossIntro(ctx) {
+        ctx.save(); ctx.globalAlpha = 1;
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 800, 600);
+        const t = 3 - this.bossIntroTimer; // 経過時間
+        if (t > 0.5) {
+            const a = Math.min(1, (t - 0.5) / 0.5);
+            ctx.globalAlpha = a;
+            ctx.fillStyle = '#cc2222'; ctx.font = 'bold 40px monospace'; ctx.textAlign = 'center';
+            ctx.fillText('GIANT DRAKE', 400, 270);
+            ctx.fillStyle = '#ff4444'; ctx.font = 'bold 28px monospace';
+            ctx.fillText('APPEARS!', 400, 320);
+        }
+        // 赤い脈動エフェクト
+        if (t > 1.0) {
+            const pulse = Math.sin(t * 6) * 0.15;
+            ctx.globalAlpha = Math.max(0, pulse);
+            ctx.fillStyle = '#330000';
+            ctx.fillRect(0, 0, 800, 600);
+        }
+        ctx.globalAlpha = 1;
+        ctx.restore();
+    }
+
     // ========================================
     // タイトル画面
     // ========================================
