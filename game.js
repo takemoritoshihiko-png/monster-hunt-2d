@@ -2182,54 +2182,179 @@ class Game {
     getDifficultyStars(l) { let s='';for(let i=0;i<3;i++)s+=i<l?'\u2605':'\u2606';return s; }
 
     drawInventory(ctx) {
-        ctx.save();ctx.globalAlpha=1;
-        ctx.fillStyle='rgba(0,0,0,0.85)';ctx.fillRect(0,0,800,600);
-        const px=100,py=60,pw=600,ph=480;
-        roundRect(ctx,px,py,pw,ph,10);ctx.fillStyle='#1a1a2e';ctx.fill();
-        roundRect(ctx,px,py,pw,ph,10);ctx.strokeStyle='#4488cc';ctx.lineWidth=2;ctx.stroke();
-        ctx.fillStyle='#4488cc';ctx.font='bold 24px monospace';ctx.textAlign='center';
-        ctx.fillText('INVENTORY',400,py+35);
-        let y=py+70;
-        ctx.fillStyle='#88ccff';ctx.font='bold 16px monospace';ctx.textAlign='left';ctx.fillText('Materials',px+30,y);
-        y+=10;ctx.strokeStyle='#333355';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(px+30,y);ctx.lineTo(px+pw-30,y);ctx.stroke();
-        y+=25;ctx.font='14px monospace';let has=false;
-        for(const[id,mat]of Object.entries(MATERIALS)){const c=this.inventory.getMaterialCount(id);if(c>0){has=true;ctx.fillStyle=mat.color;ctx.beginPath();ctx.arc(px+45,y-4,6,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.fillText(`${mat.name} (${mat.description})`,px+60,y);ctx.fillStyle='#ffcc44';ctx.textAlign='right';ctx.fillText(`x${c}`,px+pw-40,y);ctx.textAlign='left';y+=28;}}
-        if(!has){ctx.fillStyle='#666';ctx.fillText('No materials',px+60,y);y+=28;}
-        y+=15;ctx.fillStyle='#ffcc44';ctx.font='bold 16px monospace';ctx.fillText('Weapons',px+30,y);
-        y+=10;ctx.strokeStyle='#333355';ctx.beginPath();ctx.moveTo(px+30,y);ctx.lineTo(px+pw-30,y);ctx.stroke();
-        y+=25;ctx.font='14px monospace';
-        for(const w of this.inventory.weapons){const eq=this.player&&w===this.player.weapon;const tl=w.type==='ranged'?'Ranged':'Melee';if(eq){ctx.fillStyle='#44ff44';ctx.fillText('E',px+35,y);}ctx.fillStyle=eq?'#fff':'#aaa';ctx.fillText(w.name,px+60,y);ctx.fillStyle='#888';ctx.textAlign='right';ctx.fillText(`[${tl}] DMG:${w.damage} RNG:${w.range}`,px+pw-40,y);ctx.textAlign='left';y+=28;}
-        y+=15;ctx.fillStyle='#aaddff';ctx.font='bold 16px monospace';ctx.fillText('Armor',px+30,y);
-        y+=10;ctx.strokeStyle='#333355';ctx.beginPath();ctx.moveTo(px+30,y);ctx.lineTo(px+pw-30,y);ctx.stroke();
-        y+=25;ctx.font='14px monospace';
-        if(this.inventory.armors.length===0){ctx.fillStyle='#666';ctx.fillText('No armor',px+60,y);}
-        else{for(const a of this.inventory.armors){const eq=this.player&&a===this.player.armor;if(eq){ctx.fillStyle='#44ff44';ctx.fillText('E',px+35,y);}ctx.fillStyle=eq?'#fff':'#aaa';ctx.fillText(a.name,px+60,y);ctx.fillStyle='#888';ctx.textAlign='right';ctx.fillText(`DEF+${a.defense} (x${a.damageMultiplier})`,px+pw-40,y);ctx.textAlign='left';y+=28;}}
-        ctx.fillStyle='rgba(255,255,255,0.5)';ctx.font='14px monospace';ctx.textAlign='center';
-        ctx.fillText('Press I to close',400,py+ph-20);ctx.restore();
+        ctx.save(); ctx.globalAlpha = 1;
+        // 全画面オーバーレイ
+        ctx.fillStyle = '#0d0d1a';
+        ctx.fillRect(0, 0, 800, 600);
+        // タイトル
+        ctx.fillStyle = '#4488cc'; ctx.font = 'bold 28px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('INVENTORY', 400, 40);
+        ctx.strokeStyle = '#333355'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(30, 52); ctx.lineTo(770, 52); ctx.stroke();
+
+        // === 左列: 素材 ===
+        let y = 75;
+        ctx.fillStyle = '#88ccff'; ctx.font = 'bold 15px monospace'; ctx.textAlign = 'left';
+        ctx.fillText('Materials', 30, y);
+        y += 22; ctx.font = '13px monospace';
+        let has = false;
+        for (const [id, mat] of Object.entries(MATERIALS)) {
+            const c = this.inventory.getMaterialCount(id);
+            if (c > 0) {
+                has = true;
+                ctx.fillStyle = mat.color;
+                ctx.beginPath(); ctx.arc(45, y - 4, 5, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#ddd';
+                ctx.fillText(`${mat.name}`, 58, y);
+                ctx.fillStyle = '#ffcc44'; ctx.textAlign = 'right';
+                ctx.fillText(`x${c}`, 370, y);
+                ctx.textAlign = 'left';
+                y += 24;
+            }
+        }
+        if (!has) { ctx.fillStyle = '#555'; ctx.fillText('No materials', 58, y); y += 24; }
+
+        // === 右列上: 武器 ===
+        let wy = 75;
+        ctx.fillStyle = '#ffcc44'; ctx.font = 'bold 15px monospace';
+        ctx.fillText('Weapons', 420, wy);
+        wy += 22; ctx.font = '13px monospace';
+        for (const w of this.inventory.weapons) {
+            const eq = this.player && w === this.player.weapon;
+            if (eq) { ctx.fillStyle = '#44ff44'; ctx.fillText('E', 425, wy); }
+            ctx.fillStyle = eq ? '#fff' : '#aaa';
+            ctx.fillText(w.name, 445, wy);
+            ctx.fillStyle = '#777'; ctx.textAlign = 'right';
+            ctx.fillText(`DMG:${w.damage} ${w.desc}`, 770, wy);
+            ctx.textAlign = 'left';
+            wy += 24;
+        }
+
+        // === 右列下: 防具 ===
+        wy += 12;
+        ctx.fillStyle = '#aaddff'; ctx.font = 'bold 15px monospace';
+        ctx.fillText('Armor', 420, wy);
+        wy += 22; ctx.font = '13px monospace';
+        if (this.inventory.armors.length === 0) {
+            ctx.fillStyle = '#555'; ctx.fillText('No armor', 445, wy);
+        } else {
+            for (const a of this.inventory.armors) {
+                const eq = this.player && a === this.player.armor;
+                if (eq) { ctx.fillStyle = '#44ff44'; ctx.fillText('E', 425, wy); }
+                ctx.fillStyle = eq ? '#fff' : '#aaa';
+                ctx.fillText(`${a.name}  DEF+${a.defense} (x${a.damageMultiplier})`, 445, wy);
+                wy += 24;
+            }
+        }
+
+        // 操作ガイド（最下部固定）
+        ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('Press I to close', 400, 580);
+        ctx.restore();
     }
 
     drawCraftMenu(ctx) {
-        ctx.save();ctx.globalAlpha=1;
-        ctx.fillStyle='rgba(0,0,0,0.85)';ctx.fillRect(0,0,800,600);
-        const px=100,py=60,pw=600,ph=480;
-        roundRect(ctx,px,py,pw,ph,10);ctx.fillStyle='#1a1a2e';ctx.fill();
-        roundRect(ctx,px,py,pw,ph,10);ctx.strokeStyle='#cc8844';ctx.lineWidth=2;ctx.stroke();
-        ctx.fillStyle='#cc8844';ctx.font='bold 24px monospace';ctx.textAlign='center';ctx.fillText('CRAFT',400,py+35);
-        let y=py+70;
-        for(let i=0;i<RECIPES.length;i++){
-            const r=RECIPES[i],cc=this.inventory.canCraft(r),own=this.inventory.alreadyOwns(r),sel=i===this.craftCursor;
-            const rh=100,ry=y;
-            if(sel){ctx.fillStyle='rgba(204,136,68,0.15)';roundRect(ctx,px+15,ry-5,pw-30,rh,6);ctx.fill();roundRect(ctx,px+15,ry-5,pw-30,rh,6);ctx.strokeStyle='#cc8844';ctx.lineWidth=1;ctx.stroke();ctx.fillStyle='#cc8844';ctx.font='16px monospace';ctx.textAlign='left';ctx.fillText('>',px+22,ry+18);}
-            ctx.fillStyle=own?'#666':(cc?'#fff':'#888');ctx.font='bold 16px monospace';ctx.textAlign='left';ctx.fillText(r.name,px+40,ry+18);
-            if(own){ctx.fillStyle='#44cc44';ctx.font='12px monospace';ctx.fillText('[OWNED]',px+40+ctx.measureText(r.name).width+10,ry+18);}
-            ctx.fillStyle='#aaa';ctx.font='12px monospace';ctx.fillText(r.description,px+40,ry+38);
-            let mx2=px+40;const my2=ry+60;ctx.fillText('Required: ',mx2,my2);mx2+=ctx.measureText('Required: ').width;
-            for(const req of r.materials){const mat=MATERIALS[req.materialId];const ow=this.inventory.getMaterialCount(req.materialId);const en=ow>=req.count;ctx.fillStyle=mat.color;ctx.beginPath();ctx.arc(mx2+5,my2-4,5,0,Math.PI*2);ctx.fill();mx2+=15;ctx.fillStyle=en?'#44cc44':'#cc4444';const tx=`${mat.name} ${ow}/${req.count}  `;ctx.fillText(tx,mx2,my2);mx2+=ctx.measureText(tx).width;}
-            if(sel&&!own){const bx=px+pw-160,by2=ry+5,bw=120,bh=28;ctx.fillStyle=cc?'#44aa44':'#444';roundRect(ctx,bx,by2,bw,bh,4);ctx.fill();ctx.fillStyle=cc?'#fff':'#888';ctx.font='bold 13px monospace';ctx.textAlign='center';ctx.fillText('CRAFT [Z]',bx+bw/2,by2+19);ctx.textAlign='left';}
-            y+=rh+10;
+        ctx.save(); ctx.globalAlpha = 1;
+        // 全画面オーバーレイ
+        ctx.fillStyle = '#0d0d1a';
+        ctx.fillRect(0, 0, 800, 600);
+        // タイトル
+        ctx.fillStyle = '#cc8844'; ctx.font = 'bold 28px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('CRAFT', 400, 40);
+        ctx.strokeStyle = '#443322'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(30, 52); ctx.lineTo(770, 52); ctx.stroke();
+
+        // 2列グリッドでレシピカード配置
+        // 左列: 0,2,4  右列: 1,3,5
+        const cardW = 360, cardH = 140, gap = 15;
+        const colX = [20, 410];
+        const startY = 65;
+
+        for (let i = 0; i < RECIPES.length; i++) {
+            const r = RECIPES[i];
+            const col = i % 2;
+            const row = Math.floor(i / 2);
+            const cx = colX[col];
+            const cy = startY + row * (cardH + gap);
+            const cc = this.inventory.canCraft(r);
+            const own = this.inventory.alreadyOwns(r);
+            const sel = i === this.craftCursor;
+
+            // カード背景
+            if (sel) {
+                ctx.fillStyle = 'rgba(204,136,68,0.12)';
+                roundRect(ctx, cx, cy, cardW, cardH, 8); ctx.fill();
+                ctx.strokeStyle = '#cc8844'; ctx.lineWidth = 2;
+                roundRect(ctx, cx, cy, cardW, cardH, 8); ctx.stroke();
+            } else {
+                ctx.fillStyle = '#111122';
+                roundRect(ctx, cx, cy, cardW, cardH, 8); ctx.fill();
+                ctx.strokeStyle = '#333344'; ctx.lineWidth = 1;
+                roundRect(ctx, cx, cy, cardW, cardH, 8); ctx.stroke();
+            }
+
+            // カーソル
+            if (sel) {
+                ctx.fillStyle = '#cc8844'; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'left';
+                ctx.fillText('>', cx + 8, cy + 24);
+            }
+
+            // 武器名
+            ctx.fillStyle = own ? '#666' : (cc ? '#fff' : '#888');
+            ctx.font = 'bold 15px monospace'; ctx.textAlign = 'left';
+            ctx.fillText(r.name, cx + 25, cy + 24);
+
+            // [OWNED]
+            if (own) {
+                ctx.fillStyle = '#44cc44'; ctx.font = '11px monospace';
+                ctx.fillText('[OWNED]', cx + 25 + ctx.measureText(r.name).width + 8, cy + 24);
+            }
+
+            // 説明
+            ctx.fillStyle = '#999'; ctx.font = '11px monospace';
+            ctx.fillText(r.description, cx + 25, cy + 44);
+
+            // 必要素材
+            ctx.fillStyle = '#888'; ctx.font = '11px monospace';
+            let mx = cx + 25;
+            const my = cy + 68;
+            for (const req of r.materials) {
+                const mat = MATERIALS[req.materialId];
+                const ow = this.inventory.getMaterialCount(req.materialId);
+                const en = ow >= req.count;
+                ctx.fillStyle = mat.color;
+                ctx.beginPath(); ctx.arc(mx + 4, my - 3, 4, 0, Math.PI * 2); ctx.fill();
+                mx += 12;
+                ctx.fillStyle = en ? '#44cc44' : '#cc4444';
+                const tx = `${mat.name} ${ow}/${req.count}  `;
+                ctx.fillText(tx, mx, my);
+                mx += ctx.measureText(tx).width;
+            }
+
+            // クラフトボタン
+            if (sel && !own) {
+                const bx = cx + cardW - 110, by = cy + cardH - 35;
+                const bw = 95, bh = 26;
+                ctx.fillStyle = cc ? '#44aa44' : '#333';
+                roundRect(ctx, bx, by, bw, bh, 4); ctx.fill();
+                ctx.fillStyle = cc ? '#fff' : '#777';
+                ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
+                ctx.fillText('CRAFT [Z]', bx + bw / 2, by + 17);
+                ctx.textAlign = 'left';
+            }
         }
-        if(this.craftMessageTimer>0){ctx.fillStyle=`rgba(255,255,100,${Math.min(1,this.craftMessageTimer/300)})`;ctx.font='bold 18px monospace';ctx.textAlign='center';ctx.fillText(this.craftMessage,400,py+ph-55);}
-        ctx.fillStyle='rgba(255,255,255,0.5)';ctx.font='14px monospace';ctx.textAlign='center';ctx.fillText('W/S:Select  Z:Craft  C:Close',400,py+ph-20);
+
+        // クラフトメッセージ
+        if (this.craftMessageTimer > 0) {
+            const alpha = Math.min(1, this.craftMessageTimer / 300);
+            ctx.fillStyle = `rgba(255,255,100,${alpha})`;
+            ctx.font = 'bold 18px monospace'; ctx.textAlign = 'center';
+            ctx.fillText(this.craftMessage, 400, 545);
+        }
+
+        // 操作ガイド（最下部固定）
+        ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('W/S:Select  Z:Craft  C:Close', 400, 580);
         ctx.restore();
     }
 }
