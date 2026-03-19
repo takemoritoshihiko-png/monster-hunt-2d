@@ -333,7 +333,7 @@ export class Monster {
         if (!this.alive) return;
         // Ice Wolf描画
         if (this.isIceWolf) {
-            const sw = 80, sh = 80;
+            const sw = 130, sh = 130;
             const drawX = this.x + this.width/2 - sw/2;
             const drawY = this.y + this.height/2 - sh/2;
             if (img) {
@@ -358,7 +358,7 @@ export class Monster {
             }
             return;
         }
-        const sw=this.isBoss?144:96, sh=sw;
+        const sw = this.isElder ? 300 : (this.isBoss ? 220 : 160), sh = sw;
         const dx=this.x+this.width/2-sw/2, dy=this.y+this.height/2-sh/2;
         if (this.state==='charge_windup') {
             const p=1-(this.chargeWindupTimer/this.chargeWindupDuration);
