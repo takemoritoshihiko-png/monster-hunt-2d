@@ -72,22 +72,70 @@ class SoundManager {
         osc.start();
         osc.stop(this.ctx.currentTime + duration);
     }
-    playHit() {
-        this._beep(400, 0.08, 'square', 0.12);
-        setTimeout(() => this._beep(300, 0.06, 'square', 0.08), 40);
+    /** 剣ヒット音（下降スイープ） */
+    playSwordHit() {
+        if (!this.ctx||!this.enabled) return;
+        const t=this.ctx.currentTime;
+        const osc=this.ctx.createOscillator(), gain=this.ctx.createGain();
+        osc.type='square'; osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.frequency.setValueAtTime(300, t);
+        osc.frequency.exponentialRampToValueAtTime(100, t+0.1);
+        gain.gain.setValueAtTime(0.3, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t+0.1);
+        osc.start(t); osc.stop(t+0.1);
     }
+    playHit() { this.playSwordHit(); }
     playComboHit() {
-        this._beep(500, 0.06, 'square', 0.15);
+        if (!this.ctx||!this.enabled) return;
+        const t=this.ctx.currentTime;
+        const osc=this.ctx.createOscillator(), gain=this.ctx.createGain();
+        osc.type='square'; osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.frequency.setValueAtTime(400, t);
+        osc.frequency.exponentialRampToValueAtTime(150, t+0.15);
+        gain.gain.setValueAtTime(0.35, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t+0.15);
+        osc.start(t); osc.stop(t+0.15);
+        // 追加の高音レイヤー
         setTimeout(() => this._beep(600, 0.08, 'sine', 0.12), 30);
     }
-    playPickup() {
-        this._beep(800, 0.06, 'sine', 0.1);
-        setTimeout(() => this._beep(1200, 0.08, 'sine', 0.1), 60);
+    /** アイテム取得音（ピロン↑） */
+    playItemGet() {
+        this._beep(880, 0.06, 'sine', 0.12);
+        setTimeout(() => this._beep(1320, 0.08, 'sine', 0.12), 50);
+        setTimeout(() => this._beep(1760, 0.06, 'sine', 0.1), 100);
     }
-    playQuestComplete() {
+    playPickup() { this.playItemGet(); }
+    /** クエストクリア音（明るい3音上昇） */
+    playQuestClear() {
         [523, 659, 784, 1047].forEach((f, i) => {
-            setTimeout(() => this._beep(f, 0.25, 'sine', 0.15), i * 150);
+            setTimeout(() => this._beep(f, 0.3, 'sine', 0.18), i * 150);
         });
+    }
+    playQuestComplete() { this.playQuestClear(); }
+    /** 被ダメージ音（低いドン） */
+    playDamage() {
+        if (!this.ctx||!this.enabled) return;
+        const t=this.ctx.currentTime;
+        const osc=this.ctx.createOscillator(), gain=this.ctx.createGain();
+        osc.type='sawtooth'; osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.frequency.setValueAtTime(120, t);
+        osc.frequency.exponentialRampToValueAtTime(60, t+0.15);
+        gain.gain.setValueAtTime(0.25, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t+0.15);
+        osc.start(t); osc.stop(t+0.15);
+    }
+    /** モンスター撃破音（下降する爆発音） */
+    playMonsterDie() {
+        if (!this.ctx||!this.enabled) return;
+        const t=this.ctx.currentTime;
+        const osc=this.ctx.createOscillator(), gain=this.ctx.createGain();
+        osc.type='sawtooth'; osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.frequency.setValueAtTime(300, t);
+        osc.frequency.exponentialRampToValueAtTime(40, t+0.4);
+        gain.gain.setValueAtTime(0.3, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t+0.4);
+        osc.start(t); osc.stop(t+0.4);
+        setTimeout(() => this._beep(80, 0.2, 'square', 0.1), 100);
     }
     playQuestFailed() {
         this._beep(300, 0.3, 'sawtooth', 0.1);
@@ -111,8 +159,8 @@ const MATERIALS = {
 
 const DROP_TABLES = {
     forestDrake: [
-        { materialId: 'drakeScale', chance: 0.6, minCount: 1, maxCount: 3 },
-        { materialId: 'drakeFang',  chance: 0.4, minCount: 1, maxCount: 2 },
+        { materialId: 'drakeScale', chance: 1.0, minCount: 2, maxCount: 4 },
+        { materialId: 'drakeFang',  chance: 0.5, minCount: 1, maxCount: 2 },
         { materialId: 'drakeCore',  chance: 0.2, minCount: 1, maxCount: 1 },
     ],
     giantDrake: [],
@@ -142,7 +190,7 @@ const QUESTS = [
             name: 'Forest Drake', x: 400 - 32, y: 220,
             config: { hp: 500, width: 64, height: 64, speed: 80, color: '#cc3333',
                       attackDamage: 10, attackRange: 55, attackCooldown: 1000,
-                      aggroRange: 300, dropTableId: 'forestDrake' },
+                      aggroRange: 400, dropTableId: 'forestDrake' },
         }],
     },
     {
@@ -153,11 +201,11 @@ const QUESTS = [
             { name: 'Forest Drake', x: 250, y: 180,
               config: { hp: 500, width: 64, height: 64, speed: 80, color: '#cc3333',
                         attackDamage: 10, attackRange: 55, attackCooldown: 1000,
-                        aggroRange: 300, dropTableId: 'forestDrake' } },
+                        aggroRange: 400, dropTableId: 'forestDrake' } },
             { name: 'Forest Drake', x: 500, y: 250,
               config: { hp: 500, width: 64, height: 64, speed: 85, color: '#dd4444',
                         attackDamage: 10, attackRange: 55, attackCooldown: 1000,
-                        aggroRange: 300, dropTableId: 'forestDrake' } },
+                        aggroRange: 400, dropTableId: 'forestDrake' } },
         ],
     },
     {
@@ -180,7 +228,7 @@ class Weapon {
     }
 }
 const WEAPONS = {
-    basicSword: new Weapon('Basic Sword', 15, 40, 400, 3, 'melee'),
+    basicSword: new Weapon('Basic Sword', 15, 40, 350, 3, 'melee'),
     ironSword:  new Weapon('Iron Sword',  30, 50, 400, 5, 'melee'),
     hunterBow:  new Weapon('Hunter Bow',  20, 300, 600, 0, 'ranged'),
 };
@@ -316,7 +364,7 @@ class Inventory {
 class Player {
     constructor(x, y, inventory) {
         this.x = x; this.y = y; this.width = 32; this.height = 32;
-        this.speed = 200; this.maxHp = 100; this.hp = this.maxHp;
+        this.speed = 260; this.maxHp = 100; this.hp = this.maxHp;
         this.maxStamina = 100; this.stamina = this.maxStamina;
         this.facing = 'down'; this.inventory = inventory;
         this.weapon = this.inventory.weapons[0]; this.weaponIndex = 0;
@@ -404,6 +452,7 @@ class Player {
         const m = this.armor ? this.armor.damageMultiplier : 1.0;
         this.hp = Math.max(0, this.hp - Math.max(1, Math.floor(amount*m)));
         this.invincibleTimer = this.invincibleDuration;
+        Sound.playDamage();
     }
     draw(ctx, img) {
         if (this.invincibleTimer>0 && Math.floor(this.invincibleTimer/80)%2===0) return;
@@ -599,7 +648,8 @@ class Game {
         this.canvas = document.getElementById(canvasId);
         this.ctx = this.canvas.getContext('2d');
         this.keys = {};
-        this.state = 'lobby'; this.lastTime = 0;
+        this.state = 'title'; this.lastTime = 0;
+        this.titleTimer = 0; // タイトル画面の経過時間
         this.droppedItems = []; this.arrows = []; this.monsters = [];
         this.particles = [];    // パーティクル管理
         this.currentQuest = null; this.questRewards = [];
@@ -732,6 +782,8 @@ class Game {
         window.addEventListener('keydown', (e) => {
             const key = e.key.toLowerCase();
             this.keys[key] = true;
+            // タイトル画面 → ロビーへ
+            if (this.state==='title') { this.state='lobby'; return; }
             if (this.state==='lobby') {
                 if (key==='arrowup'||key==='w') this.lobbyCursor=Math.max(0,this.lobbyCursor-1);
                 else if (key==='arrowdown'||key==='s') this.lobbyCursor=Math.min(QUESTS.length-1,this.lobbyCursor+1);
@@ -818,7 +870,7 @@ class Game {
         const isFinish = this.player.comboCount === 2;
         this.spawnHitParticles(hx, hy, isFinish ? 12 : 7, isFinish);
         if (isFinish) Sound.playComboHit(); else Sound.playHit();
-        if (!monster.alive) this.onMonsterDefeated(monster);
+        if (!monster.alive) { Sound.playMonsterDie(); this.onMonsterDefeated(monster); }
     }
 
     onMonsterDefeated(monster) {
@@ -848,6 +900,13 @@ class Game {
         if (this.craftMessageTimer>0) this.craftMessageTimer-=dt*1000;
         if (this.weaponSwitchTimer>0) this.weaponSwitchTimer-=dt*1000;
         if (this.shakeTimer>0) this.shakeTimer-=dt*1000;
+
+        // タイトル画面タイマー
+        if (this.state==='title') {
+            this.titleTimer += dt;
+            if (this.titleTimer > 3) this.state = 'lobby';
+            return;
+        }
 
         // パーティクル更新（常に）
         for (const p of this.particles) p.update(dt);
@@ -923,6 +982,7 @@ class Game {
             ctx.translate(sx,sy);
         }
         switch(this.state) {
+            case 'title': this.drawTitle(ctx); break;
             case 'lobby': this.drawLobby(ctx); break;
             case 'playing': this.drawField(ctx); break;
             case 'inventory':
@@ -1056,6 +1116,8 @@ class Game {
         }
         ctx.fillStyle='rgba(255,255,255,0.5)';ctx.font='12px monospace';ctx.textAlign='center';
         ctx.fillText('WASD:Move  Z:Attack  Q:Switch  I:Inventory  C:Craft',400,590);
+        // ミニマップ描画
+        this.drawMinimap(ctx);
     }
 
     // ========================================
@@ -1126,6 +1188,99 @@ class Game {
     // ========================================
     // ロビー / インベントリ / クラフト（Phase 3と同じ）
     // ========================================
+    // ========================================
+    // タイトル画面
+    // ========================================
+    drawTitle(ctx) {
+        ctx.save(); ctx.globalAlpha = 1;
+        // ダークグリーンのグラデーション背景
+        const grad = ctx.createLinearGradient(0, 0, 0, 600);
+        grad.addColorStop(0, '#0a2a0a');
+        grad.addColorStop(0.5, '#143814');
+        grad.addColorStop(1, '#0a1a0a');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 800, 600);
+        // 装飾パーティクル（ゆっくり浮かぶ光）
+        const t = this.titleTimer;
+        for (let i = 0; i < 15; i++) {
+            const x = 100 + (i * 137) % 600;
+            const y = 500 - ((t * 30 + i * 80) % 600);
+            const a = 0.1 + Math.sin(t * 2 + i) * 0.1;
+            ctx.globalAlpha = a;
+            ctx.fillStyle = '#88cc44';
+            ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        // ロゴ（ゴールドテキスト）
+        const logoAlpha = Math.min(1, t / 0.8);
+        ctx.globalAlpha = logoAlpha;
+        ctx.fillStyle = '#cc9933';
+        ctx.font = 'bold 52px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('MONSTER HUNT 2D', 400, 230);
+        // ロゴの影
+        ctx.fillStyle = '#664411';
+        ctx.fillText('MONSTER HUNT 2D', 402, 233);
+        // ロゴ上に重ねて明るい色
+        ctx.fillStyle = '#ffcc44';
+        ctx.fillText('MONSTER HUNT 2D', 400, 230);
+        ctx.globalAlpha = 1;
+        // サブタイトル
+        if (t > 0.5) {
+            const subAlpha = Math.min(1, (t - 0.5) / 0.5);
+            ctx.globalAlpha = subAlpha;
+            ctx.fillStyle = '#88aa66';
+            ctx.font = '18px monospace';
+            ctx.fillText('Hunt. Craft. Survive.', 400, 280);
+            ctx.globalAlpha = 1;
+        }
+        // 「Press any key to start」点滅
+        if (t > 1.0) {
+            const blinkAlpha = 0.4 + Math.sin(t * 4) * 0.4;
+            ctx.globalAlpha = blinkAlpha;
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '16px monospace';
+            ctx.fillText('Press any key to start', 400, 420);
+            ctx.globalAlpha = 1;
+        }
+        ctx.restore();
+    }
+
+    // ========================================
+    // ミニマップ描画
+    // ========================================
+    drawMinimap(ctx) {
+        const mmW = 150, mmH = 100;
+        const mmX = this.canvas.width - mmW - 10, mmY = 10;
+        const scaleX = mmW / 800, scaleY = mmH / 600;
+        ctx.save();
+        // 背景
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        roundRect(ctx, mmX, mmY, mmW, mmH, 4); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1;
+        roundRect(ctx, mmX, mmY, mmW, mmH, 4); ctx.stroke();
+        // 木（緑の小四角）
+        ctx.fillStyle = '#2a6a2a';
+        for (const tree of TREES) {
+            ctx.fillRect(mmX + tree.x * scaleX - 2, mmY + tree.y * scaleY - 2, 4, 4);
+        }
+        // モンスター（赤い点）
+        for (const m of this.monsters) {
+            if (!m.alive) continue;
+            ctx.fillStyle = m.isBoss ? '#ff6622' : '#ff3333';
+            const mx = mmX + (m.x + m.width/2) * scaleX;
+            const my = mmY + (m.y + m.height/2) * scaleY;
+            ctx.beginPath(); ctx.arc(mx, my, m.isBoss ? 4 : 3, 0, Math.PI*2); ctx.fill();
+        }
+        // プレイヤー（白い点）
+        if (this.player) {
+            ctx.fillStyle = '#ffffff';
+            const px = mmX + (this.player.x + this.player.width/2) * scaleX;
+            const py = mmY + (this.player.y + this.player.height/2) * scaleY;
+            ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill();
+        }
+        ctx.restore();
+    }
+
     drawLobby(ctx) {
         ctx.save(); ctx.globalAlpha=1;
         ctx.fillStyle='#0e0e1a'; ctx.fillRect(0,0,800,600);
