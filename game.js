@@ -334,7 +334,7 @@ class Game {
     }
 
     loadImages() {
-        const files = { player:'assets/player.png', forestDrake:'assets/forest_drake.png', giantDrake:'assets/giant_drake.png', iceWolf:'assets/ice_wolf.png' };
+        const files = { player:'assets/player.png', forestDrake:'assets/forest_drake.png', giantDrake:'assets/giant_drake.png', iceWolf:'assets/ice_wolf.png', lobbyBg:'assets/lobby_bg.jpg' };
         return Promise.all(Object.entries(files).map(([k,s])=>new Promise(r=>{
             const img=new Image(); img.onload=()=>{this.images[k]=img;r();}; img.onerror=()=>{console.warn(`Load fail: ${s}`);r();}; img.src=s;
         })));
@@ -1532,57 +1532,23 @@ class Game {
         ctx.save(); ctx.globalAlpha = 1;
         const t = this.lobbyTime;
 
-        // === プリレンダリング背景 ===
-        if (this.lobbyBgCanvas) ctx.drawImage(this.lobbyBgCanvas, 0, 0);
-        else { ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0,0,this.W,this.H); }
-
-        // === 星の明滅（動的レイヤー） ===
-        const rng2 = new SeededRandom(77);
-        for (let i = 0; i < 100; i++) {
-            const sx = rng2.next() * this.W, sy = rng2.next() * this.H*0.65;
-            const sr = 0.5 + rng2.next() * 1.5;
-            const flicker = 0.3 + Math.sin(t * (1.5 + rng2.next() * 2) + i) * 0.3;
-            ctx.fillStyle = `rgba(255,255,255,${flicker})`;
-            ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2); ctx.fill();
-        }
-
-        // === 龍のシルエット ===
-        ctx.save();
-        const dragonBaseX = this.W*0.85, dragonY = this.H*0.3 + Math.sin(t * Math.PI / 2) * 15;
-        ctx.globalAlpha = 0.12;
-        ctx.fillStyle = '#000';
-        ctx.beginPath(); ctx.ellipse(dragonBaseX, dragonY, 80, 50, 0, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.ellipse(dragonBaseX-70, dragonY - 30, 30, 25, -0.3, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.moveTo(dragonBaseX+80, dragonY); ctx.quadraticCurveTo(dragonBaseX+130, dragonY + 20, dragonBaseX+110, dragonY + 60); ctx.lineTo(dragonBaseX+90, dragonY + 40); ctx.closePath(); ctx.fill();
-        // 翼（開閉アニメーション）
-        const wingSpread = 0.8 + Math.sin(t * 1.5) * 0.2;
-        ctx.beginPath();
-        ctx.moveTo(dragonBaseX-20, dragonY - 20);
-        ctx.lineTo(dragonBaseX-20 - 80 * wingSpread, dragonY - 80 * wingSpread);
-        ctx.lineTo(dragonBaseX-20 - 30, dragonY - 10);
-        ctx.closePath(); ctx.fill();
-        ctx.beginPath();
-        ctx.moveTo(dragonBaseX+20, dragonY - 20);
-        ctx.lineTo(dragonBaseX+20 + 70 * wingSpread, dragonY - 70 * wingSpread);
-        ctx.lineTo(dragonBaseX+20 + 25, dragonY - 10);
-        ctx.closePath(); ctx.fill();
-        ctx.restore();
-
-        // === 火の粉パーティクル ===
-        for (let i = 0; i < 20; i++) {
-            const fx = (i * 43 + t * 20) % this.W;
-            const fy = (this.H-20) - ((t * 25 + i * 30) % this.H);
-            const fa = 0.15 + Math.sin(t * 3 + i * 2) * 0.1;
-            ctx.fillStyle = `rgba(255,${130 + i * 5},30,${fa})`;
-            ctx.beginPath(); ctx.arc(fx, fy, 1.5, 0, Math.PI * 2); ctx.fill();
+        // === 背景画像 ===
+        if (this.images.lobbyBg) {
+            ctx.drawImage(this.images.lobbyBg, 0, 0, this.W, this.H);
+            // 半透明の暗幕で文字を読みやすく
+            ctx.fillStyle = 'rgba(0,0,0,0.35)';
+            ctx.fillRect(0, 0, this.W, this.H);
+        } else {
+            ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, 0, this.W, this.H);
         }
 
         // === タイトルロゴ ===
+        const cx = this.W / 2;
+        ctx.save();
+        ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 10;
         ctx.font = 'bold 44px monospace'; ctx.textAlign = 'center';
-        // 影
-        const cx = this.W/2;
-        ctx.fillStyle = '#331a00'; ctx.fillText('MONSTER HUNT 2D', cx+2, 42);
         ctx.fillStyle = '#ffcc44'; ctx.fillText('MONSTER HUNT 2D', cx, 40);
+        ctx.restore();
         // アンダーライン（流れる光）
         const lineProgress = (t * 0.4) % 1;
         const lineGrad = ctx.createLinearGradient(cx-300, 0, cx+300, 0);
@@ -1591,8 +1557,11 @@ class Game {
         lineGrad.addColorStop(Math.min(1, lineProgress + 0.15), 'rgba(255,80,30,0)');
         ctx.strokeStyle = lineGrad; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.moveTo(cx-250, 48); ctx.lineTo(cx+250, 48); ctx.stroke();
-        ctx.fillStyle = '#887755'; ctx.font = 'italic 13px monospace';
+        ctx.save();
+        ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 6;
+        ctx.fillStyle = '#ddc99a'; ctx.font = 'italic 13px monospace';
         ctx.fillText('Hunt. Craft. Survive.', cx, 65);
+        ctx.restore();
 
         // === クエストカード（2列グリッド） ===
         const cardW = Math.min(355, (this.W-45)/2), cardH = Math.min(120, (this.H-200)/3);
@@ -1611,7 +1580,7 @@ class Game {
             const locked = this.isQuestLocked(q);
 
             // カード背景（深紫半透明）
-            ctx.fillStyle = sel ? 'rgba(30,20,50,0.9)' : 'rgba(20,10,30,0.85)';
+            ctx.fillStyle = sel ? 'rgba(10,5,20,0.85)' : 'rgba(0,0,0,0.75)';
             roundRect(ctx, cx, cy, cardW, cardH, 8); ctx.fill();
 
             // 選択枠（金色）
