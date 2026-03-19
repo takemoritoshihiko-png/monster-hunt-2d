@@ -45,6 +45,48 @@ class Particle {
 }
 
 // ========================================
+// ダメージ数値ポップアップ
+// ========================================
+class DamageNumber {
+    constructor(x, y, value, color = '#fff', label = '') {
+        this.x = x + (Math.random()-0.5)*20;
+        this.y = y;
+        this.value = value;
+        this.color = color;
+        this.label = label; // 'WEAK!' or 'BREAK!' or ''
+        this.life = 1000;
+        this.maxLife = 1000;
+        this.alive = true;
+    }
+    update(dt) {
+        this.y -= 40 * dt;
+        this.life -= dt * 1000;
+        if (this.life <= 0) this.alive = false;
+    }
+    draw(ctx) {
+        if (!this.alive) return;
+        const alpha = Math.max(0, this.life / this.maxLife);
+        const scale = this.life > 800 ? 1.2 : 1.0;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.font = `bold ${Math.floor(16*scale)}px monospace`;
+        ctx.textAlign = 'center';
+        // 影
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillText(this.value, this.x+1, this.y+1);
+        // 本体
+        ctx.fillStyle = this.color;
+        ctx.fillText(this.value, this.x, this.y);
+        // ラベル
+        if (this.label) {
+            ctx.font = 'bold 12px monospace';
+            ctx.fillText(this.label, this.x, this.y - 16);
+        }
+        ctx.restore();
+    }
+}
+
+// ========================================
 // 効果音管理クラス（Web Audio API）
 // ========================================
 class SoundManager {
@@ -145,6 +187,15 @@ class SoundManager {
         this._beep(200, 0.15, 'sawtooth', 0.12);
         setTimeout(() => this._beep(250, 0.15, 'sawtooth', 0.12), 150);
     }
+    playLevelUp() {
+        [523,659,784,1047,1319].forEach((f,i) => {
+            setTimeout(() => this._beep(f, 0.2, 'sine', 0.18), i * 100);
+        });
+    }
+    playPartBreak() {
+        this._beep(250, 0.15, 'square', 0.2);
+        setTimeout(() => this._beep(400, 0.1, 'sine', 0.15), 80);
+    }
 }
 const Sound = new SoundManager();
 
@@ -156,8 +207,27 @@ const MATERIALS = {
     drakeFang:  { id: 'drakeFang',  name: 'Drake Fang',  color: '#cccc44', description: 'ドレイクの牙' },
     drakeCore:  { id: 'drakeCore',  name: 'Drake Core',  color: '#cc44cc', description: 'ドレイクの核' },
     iceFang:    { id: 'iceFang',    name: 'Ice Fang',    color: '#66ccee', description: '氷の牙' },
-    iceCrystal: { id: 'iceCrystal', name: 'Ice Crystal', color: '#aaeeff', description: '氷の結晶' },
+    iceCrystal:     { id: 'iceCrystal',     name: 'Ice Crystal',     color: '#aaeeff', description: '氷の結晶' },
+    drakeHeadScale: { id: 'drakeHeadScale', name: 'Drake Head Scale', color: '#55aa77', description: '頭部の鱗' },
+    drakeTail:      { id: 'drakeTail',      name: 'Drake Tail',      color: '#aa7744', description: 'ドレイクの尻尾' },
 };
+
+// EXP・レベルアップ定数
+const EXP_TABLE = [0, 200, 500, 1000, 2000]; // Lv1→2, 2→3, ...
+const MONSTER_EXP = { 'Forest Drake': 100, 'Ice Wolf': 80, 'Giant Drake': 500 };
+const MAX_LEVEL = 5;
+
+// スキル定義
+const SKILLS = [
+    { id: 'powerSword', name: '剛剣',   desc: '近距離武器ダメージ+20%',  apply: (p) => { p.skillMeleeMult *= 1.2; } },
+    { id: 'rapidFire',  name: '速射',   desc: '弓のクールダウン-30%',    apply: (p) => { p.skillBowCdMult *= 0.7; } },
+    { id: 'ironWall',   name: '鉄壁',   desc: '被ダメージ-15%',         apply: (p) => { p.skillDefMult *= 0.85; } },
+    { id: 'swiftWind',  name: '疾風',   desc: '移動速度+20%',           apply: (p) => { p.baseSpeed = Math.floor(p.baseSpeed * 1.2); p.speed = p.baseSpeed; } },
+    { id: 'heal',       name: '回復',   desc: 'HP最大値+30・即時回復30', apply: (p) => { p.maxHp += 30; p.hp = Math.min(p.maxHp, p.hp + 30); } },
+    { id: 'flurry',     name: '連撃',   desc: '攻撃速度+25%',           apply: (p) => { p.skillAtkSpdMult *= 0.75; } },
+    { id: 'mining',     name: '採掘',   desc: '素材ドロップ数+1',        apply: (p) => { p.skillExtraDrop++; } },
+    { id: 'insight',    name: '看破',   desc: 'モンスターHP数値表示',     apply: (p) => { p.skillShowHpNum = true; } },
+];
 
 const DROP_TABLES = {
     forestDrake: [
@@ -408,6 +478,37 @@ class Player {
         // スロー効果（Ice Wolfの氷の息）
         this.slowTimer = 0;
         this.baseSpeed = this.speed;
+        // レベル・EXPシステム
+        this.level = 1;
+        this.exp = 0;
+        this.bonusDamage = 0; // レベルアップで加算
+        // スキルパラメータ
+        this.skillMeleeMult = 1.0;   // 近距離倍率
+        this.skillBowCdMult = 1.0;   // 弓CD倍率
+        this.skillDefMult = 1.0;     // 被ダメ倍率
+        this.skillAtkSpdMult = 1.0;  // 攻撃速度倍率
+        this.skillExtraDrop = 0;     // 追加ドロップ数
+        this.skillShowHpNum = false; // モンスターHP数値表示
+        this.acquiredSkills = [];    // 取得済みスキルID
+    }
+    getExpToNext() {
+        if (this.level >= MAX_LEVEL) return Infinity;
+        return EXP_TABLE[this.level - 1] || Infinity;
+    }
+    addExp(amount) {
+        if (this.level >= MAX_LEVEL) return false;
+        this.exp += amount;
+        if (this.exp >= this.getExpToNext()) {
+            this.exp -= this.getExpToNext();
+            this.level++;
+            this.maxHp += 20;
+            this.hp = Math.min(this.maxHp, this.hp + 20);
+            this.bonusDamage += 5;
+            this.baseSpeed += 5;
+            this.speed = this.baseSpeed;
+            return true; // レベルアップした
+        }
+        return false;
     }
     cycleWeapon() {
         const w = this.inventory.weapons;
@@ -467,7 +568,10 @@ class Player {
             this.comboCount = 0;
         }
         this.comboTimer = this.comboWindow;
-        this.attackCooldown = this.weapon.cooldown * (this.comboCount === 2 ? 1.3 : 1.0);
+        let cdMult = this.comboCount === 2 ? 1.3 : 1.0;
+        cdMult *= this.skillAtkSpdMult;
+        if (this.weapon.type === 'ranged') cdMult *= this.skillBowCdMult;
+        this.attackCooldown = this.weapon.cooldown * cdMult;
         if (this.weapon.type==='ranged') { this.comboCount=0; return null; }
         return this.getAttackHitbox();
     }
@@ -483,8 +587,9 @@ class Player {
     }
     takeDamage(amount) {
         if (this.invincibleTimer>0) return;
-        const m = this.armor ? this.armor.damageMultiplier : 1.0;
-        this.hp = Math.max(0, this.hp - Math.max(1, Math.floor(amount*m)));
+        const armorMult = this.armor ? this.armor.damageMultiplier : 1.0;
+        const finalDmg = Math.max(1, Math.floor(amount * armorMult * this.skillDefMult));
+        this.hp = Math.max(0, this.hp - finalDmg);
         this.invincibleTimer = this.invincibleDuration;
         Sound.playDamage();
     }
@@ -560,6 +665,19 @@ class Monster {
         this.iceBreathTimer = this.iceBreathCooldown;
         // Giant Drake 第2形態
         this.phase2 = false;
+        // 部位破壊（Drake系のみ）
+        this.hasParts = !this.isIceWolf;
+        const partHp = Math.floor(this.maxHp * 0.3);
+        this.headHp = this.hasParts ? partHp : 0;
+        this.headMaxHp = this.headHp;
+        this.headBroken = false;
+        this.tailHp = this.hasParts ? partHp : 0;
+        this.tailMaxHp = this.tailHp;
+        this.tailBroken = false;
+        this.baseAttackDamage = this.attackDamage;
+        // 弱点属性: 'ice' | null
+        this.weakness = (this.name === 'Forest Drake' || this.name === 'Giant Drake') ? 'ice' : null;
+        this.weaknessMult = this.isBoss ? 1.3 : 1.5;
     }
     update(dt, player, game) {
         if (!this.alive) return;
@@ -629,11 +747,44 @@ class Monster {
             this.x+=dx/dist*this.speed*speedMult*dt; this.y+=dy/dist*this.speed*speedMult*dt;
         } else this.state='idle';
     }
-    takeDamage(amount, kbx=0, kby=0) {
-        if (!this.alive) return;
+    /**
+     * @param {number} amount - ダメージ量
+     * @param {number} kbx - ノックバックX
+     * @param {number} kby - ノックバックY
+     * @param {number} hitX - ヒットX座標（部位判定用）
+     * @param {number} hitY - ヒットY座標（部位判定用）
+     * @returns {Object} { partBroken: string|null }
+     */
+    takeDamage(amount, kbx=0, kby=0, hitX=0, hitY=0) {
+        if (!this.alive) return { partBroken: null };
         this.hp=Math.max(0,this.hp-amount); this.hitFlashTimer=150;
         if (this.state!=='charging'&&this.state!=='charge_windup') { this.x+=kbx; this.y+=kby; }
+        // 部位ダメージ
+        let partBroken = null;
+        if (this.hasParts && hitX && hitY) {
+            const relX = hitX - this.x;
+            const relY = hitY - this.y;
+            // 頭エリア: 上1/3
+            if (relY < this.height / 3 && !this.headBroken) {
+                this.headHp = Math.max(0, this.headHp - amount);
+                if (this.headHp <= 0) {
+                    this.headBroken = true;
+                    this.attackDamage = Math.floor(this.baseAttackDamage * 0.7);
+                    partBroken = 'head';
+                }
+            }
+            // 尻尾エリア: 右1/3
+            if (relX > this.width * 2 / 3 && !this.tailBroken) {
+                this.tailHp = Math.max(0, this.tailHp - amount);
+                if (this.tailHp <= 0) {
+                    this.tailBroken = true;
+                    this.speed = Math.floor(this.speed * 0.7);
+                    partBroken = 'tail';
+                }
+            }
+        }
         if (this.hp<=0) { this.alive=false; this.state='dead'; }
+        return { partBroken };
     }
     respawn() {
         this.hp=this.maxHp; this.displayHp=this.maxHp; this.alive=true; this.state='idle';
@@ -716,6 +867,17 @@ class Monster {
             ctx.fillStyle=this.hitFlashTimer>0?'#fff':(this.state==='charging'?'#ff6633':this.color);
             ctx.fillRect(this.x,this.y,this.width,this.height);
         }
+        // 部位破壊マーカー
+        if (this.hasParts) {
+            if (this.headBroken) {
+                ctx.strokeStyle='rgba(255,100,100,0.6)'; ctx.lineWidth=2;
+                ctx.strokeRect(this.x, this.y, this.width, this.height/3);
+            }
+            if (this.tailBroken) {
+                ctx.strokeStyle='rgba(255,100,100,0.6)'; ctx.lineWidth=2;
+                ctx.strokeRect(this.x+this.width*2/3, this.y, this.width/3, this.height);
+            }
+        }
     }
 }
 
@@ -744,6 +906,12 @@ class Game {
         this.droppedItems = []; this.arrows = []; this.monsters = [];
         this.particles = [];    // パーティクル管理
         this.iceBreaths = [];   // 氷の息（飛翔体）
+        this.damageNumbers = []; // ダメージ数値ポップアップ
+        // レベルアップ・スキル選択
+        this.levelUpTimer = 0;  // LEVEL UP!表示タイマー
+        this.skillSelectActive = false;
+        this.skillChoices = [];  // 3つのスキル候補
+        this.skillCursor = 0;
         // ボス登場演出
         this.bossIntroTimer = 0;
         this.bossIntroActive = false;
@@ -842,7 +1010,7 @@ class Game {
         this.currentQuest = quest;
         this.player = new Player(this.canvas.width/2-16, this.canvas.height-80, this.inventory);
         this.monsters = quest.monsters.map(m=>new Monster(m.name,m.x,m.y,m.config));
-        this.droppedItems=[]; this.arrows=[]; this.particles=[]; this.iceBreaths=[];
+        this.droppedItems=[]; this.arrows=[]; this.particles=[]; this.iceBreaths=[]; this.damageNumbers=[];
         this.questSuccess=false; this.shakeTimer=0; this.resultAnimTimer=0;
         // ボス登場演出
         if (quest.monsters.some(m => m.config.isBoss)) {
@@ -928,6 +1096,13 @@ class Game {
                 else if (key==='enter'||key==='z') this.executeCraft();
                 return;
             }
+            // スキル選択画面
+            if (this.state==='skillSelect') {
+                if (key==='w'||key==='arrowup') this.skillCursor=Math.max(0,this.skillCursor-1);
+                else if (key==='s'||key==='arrowdown') this.skillCursor=Math.min(this.skillChoices.length-1,this.skillCursor+1);
+                else if (key==='z'||key==='enter') this.confirmSkill();
+                return;
+            }
             if (this.state!=='playing') return;
             if (key==='z') this.handleAttack();
             if (key==='q') { this.player.cycleWeapon(); this.weaponSwitchMessage=`Equipped: ${this.player.weapon.name}`; this.weaponSwitchTimer=1500; }
@@ -976,28 +1151,93 @@ class Game {
         }
     }
 
+    /**
+     * ダメージ計算（弱点・スキル・コンボ・レベル補正を統合）
+     */
+    calcDamage(baseDmg, weapon, comboMult, monster) {
+        let dmg = (baseDmg + this.player.bonusDamage) * comboMult;
+        if (weapon.type === 'melee') dmg *= this.player.skillMeleeMult;
+        // 弱点判定
+        let isWeak = false;
+        if (monster.weakness === 'ice' && (weapon.special === 'slow' || weapon.special === 'pierce')) {
+            dmg *= monster.weaknessMult;
+            isWeak = true;
+        }
+        return { dmg: Math.floor(dmg), isWeak };
+    }
+
     applyMeleeDamageToMonster(monster) {
         const dx=(monster.x+monster.width/2)-(this.player.x+this.player.width/2);
         const dy=(monster.y+monster.height/2)-(this.player.y+this.player.height/2);
         const dist=Math.sqrt(dx*dx+dy*dy)||1;
         const kb=this.player.weapon.knockback;
         const comboMult = this.player.getComboMultiplier();
-        const dmg = Math.floor(this.player.weapon.damage * comboMult);
-        monster.takeDamage(dmg, (dx/dist)*kb*comboMult, (dy/dist)*kb*comboMult);
-        // Frost Bladeのスロー効果
-        if (this.player.weapon.special === 'slow') {
-            monster.slowTimer = 1000; // 1秒間移動速度低下
-        }
-        // ヒットパーティクル
+        const { dmg, isWeak } = this.calcDamage(this.player.weapon.damage, this.player.weapon, comboMult, monster);
         const hx = monster.x+monster.width/2, hy = monster.y+monster.height/2;
+        const { partBroken } = monster.takeDamage(dmg, (dx/dist)*kb*comboMult, (dy/dist)*kb*comboMult, hx, hy);
+        // Frost Bladeのスロー効果
+        if (this.player.weapon.special === 'slow') monster.slowTimer = 1000;
+        // ダメージ数値表示
+        let numColor = '#fff', numLabel = '';
+        if (partBroken) { numColor = '#ff4444'; numLabel = 'BREAK!'; Sound.playPartBreak();
+            // 部位破壊素材ドロップ
+            const cx=monster.x+monster.width/2, cy=monster.y+monster.height/2;
+            const matId = partBroken === 'head' ? 'drakeHeadScale' : 'drakeTail';
+            const item = new DroppedItem(cx, cy, matId, 1); item.setScatter(cx, cy);
+            this.droppedItems.push(item);
+        }
+        if (isWeak && !partBroken) { numColor = '#ffaa22'; numLabel = 'WEAK!'; }
+        this.damageNumbers.push(new DamageNumber(hx, hy - 20, dmg, numColor, numLabel));
+        // ヒットパーティクル
         const isFinish = this.player.comboCount === 2;
         this.spawnHitParticles(hx, hy, isFinish ? 12 : 7, isFinish);
         if (isFinish) Sound.playComboHit(); else Sound.playHit();
         if (!monster.alive) { Sound.playMonsterDie(); this.onMonsterDefeated(monster); }
     }
 
+    confirmSkill() {
+        const skill = this.skillChoices[this.skillCursor];
+        if (skill) {
+            skill.apply(this.player);
+            this.player.acquiredSkills.push(skill.id);
+        }
+        this.skillSelectActive = false;
+        this.state = 'playing';
+    }
+
+    triggerLevelUp() {
+        this.levelUpTimer = 2000;
+        Sound.playLevelUp();
+        // レベルアップパーティクル
+        const px = this.player.x + this.player.width/2, py = this.player.y + this.player.height/2;
+        for (let i=0; i<15; i++) {
+            const a = Math.random()*Math.PI*2, sp = 60+Math.random()*80;
+            this.particles.push(new Particle(px, py, Math.cos(a)*sp, Math.sin(a)*sp-60, '#ffcc00', 600+Math.random()*400, 3));
+        }
+        // スキル選択画面を表示
+        const available = SKILLS.filter(s => !this.player.acquiredSkills.includes(s.id));
+        // ランダムに3つ選択
+        const shuffled = available.sort(() => Math.random() - 0.5);
+        this.skillChoices = shuffled.slice(0, Math.min(3, shuffled.length));
+        if (this.skillChoices.length > 0) {
+            this.skillCursor = 0;
+            this.skillSelectActive = true;
+            this.state = 'skillSelect';
+        }
+    }
+
     onMonsterDefeated(monster) {
-        this.droppedItems.push(...monster.generateDrops());
+        // ドロップ生成（スキル「採掘」の追加ドロップ対応）
+        const drops = monster.generateDrops();
+        // 採掘スキル: 各ドロップに+1
+        if (this.player.skillExtraDrop > 0) {
+            for (const d of drops) d.count += this.player.skillExtraDrop;
+        }
+        this.droppedItems.push(...drops);
+        // EXP獲得
+        const expAmount = MONSTER_EXP[monster.name] || 50;
+        const leveled = this.player.addExp(expAmount);
+        if (leveled) this.triggerLevelUp();
         // Giant Drake討伐時の特別パーティクル
         if (monster.isBoss) {
             for (let i = 0; i < 30; i++) {
@@ -1035,6 +1275,11 @@ class Game {
         if (this.craftMessageTimer>0) this.craftMessageTimer-=dt*1000;
         if (this.weaponSwitchTimer>0) this.weaponSwitchTimer-=dt*1000;
         if (this.shakeTimer>0) this.shakeTimer-=dt*1000;
+        if (this.levelUpTimer>0) this.levelUpTimer-=dt*1000;
+
+        // ダメージ数値更新
+        for (const dn of this.damageNumbers) dn.update(dt);
+        this.damageNumbers = this.damageNumbers.filter(d => d.alive);
 
         // タイトル画面タイマー
         if (this.state==='title') {
@@ -1080,7 +1325,11 @@ class Game {
                     if (arrow.pierce && arrow.hitIds.has(mi)) continue;
                     const ab={x:arrow.x-3,y:arrow.y-3,width:6,height:6};
                     if (this.checkCollision(ab,m)) {
-                        m.takeDamage(arrow.damage,0,0);
+                        const { dmg, isWeak } = this.calcDamage(arrow.damage, this.player.weapon, 1.0, m);
+                        m.takeDamage(dmg,0,0, arrow.x, arrow.y);
+                        const nc = isWeak ? '#ffaa22' : '#fff';
+                        const nl = isWeak ? 'WEAK!' : '';
+                        this.damageNumbers.push(new DamageNumber(arrow.x, arrow.y-10, dmg, nc, nl));
                         this.spawnHitParticles(arrow.x, arrow.y, 5, false);
                         Sound.playHit();
                         if (!m.alive) { Sound.playMonsterDie(); this.onMonsterDefeated(m); }
@@ -1153,6 +1402,7 @@ class Game {
             case 'craft':
                 if (this._returnToLobby) this.drawLobby(ctx); else this.drawField(ctx);
                 this.drawCraftMenu(ctx); break;
+            case 'skillSelect': this.drawField(ctx); this.drawSkillSelect(ctx); break;
             case 'bossIntro': this.drawBossIntro(ctx); break;
             case 'gameover': this.drawField(ctx); this.drawGameOver(ctx); break;
             case 'result': this.drawField(ctx); this.drawQuestComplete(ctx); break;
@@ -1189,6 +1439,17 @@ class Game {
         }
         // パーティクル
         for (const p of this.particles) { ctx.save(); p.draw(ctx); ctx.restore(); }
+        // ダメージ数値
+        for (const dn of this.damageNumbers) { ctx.save(); dn.draw(ctx); ctx.restore(); }
+        // レベルアップテキスト
+        if (this.levelUpTimer > 0) {
+            ctx.save();
+            const a = Math.min(1, this.levelUpTimer / 500);
+            ctx.globalAlpha = a;
+            ctx.fillStyle = '#ffcc00'; ctx.font = 'bold 32px monospace'; ctx.textAlign = 'center';
+            ctx.fillText(`LEVEL UP! Lv${this.player.level}`, 400, 200);
+            ctx.restore();
+        }
         // Giant Drake第2形態: 画面端赤エフェクト
         const bossPhase2 = this.monsters.find(m => m.isBoss && m.alive && m.phase2);
         if (bossPhase2) {
@@ -1252,10 +1513,37 @@ class Game {
         // HP数値
         ctx.fillStyle='#fff'; ctx.font='12px monospace'; ctx.textAlign='center';
         ctx.fillText(`${this.player.hp} / ${this.player.maxHp}`, pBarX+pBarW/2, pBarY+15);
+        // EXPバー（HP下）
+        const expBarY = pBarY + pBarH + 5;
+        roundRect(ctx, pBarX, expBarY, pBarW, 10, 3);
+        ctx.fillStyle='#111'; ctx.fill();
+        if (this.player.level < MAX_LEVEL) {
+            const expRatio = this.player.exp / this.player.getExpToNext();
+            ctx.save();
+            roundRect(ctx, pBarX, expBarY, pBarW, 10, 3); ctx.clip();
+            ctx.fillStyle='#4488cc';
+            ctx.fillRect(pBarX, expBarY, pBarW*expRatio, 10);
+            ctx.restore();
+        } else {
+            ctx.save();
+            roundRect(ctx, pBarX, expBarY, pBarW, 10, 3); ctx.clip();
+            ctx.fillStyle='#ccaa44';
+            ctx.fillRect(pBarX, expBarY, pBarW, 10);
+            ctx.restore();
+        }
+        roundRect(ctx, pBarX, expBarY, pBarW, 10, 3);
+        ctx.strokeStyle='#666'; ctx.lineWidth=1; ctx.stroke();
+        ctx.fillStyle='#aaa'; ctx.font='10px monospace'; ctx.textAlign='left';
+        if (this.player.level < MAX_LEVEL) {
+            ctx.fillText(`Lv${this.player.level}  ${this.player.exp}/${this.player.getExpToNext()} EXP`, pBarX, expBarY + 22);
+        } else {
+            ctx.fillText(`Lv${this.player.level}  MAX`, pBarX, expBarY + 22);
+        }
+
         // コンボ表示
         if (this.player.comboTimer > 0 && this.player.weapon.type === 'melee') {
             ctx.fillStyle = '#ffcc44'; ctx.font = 'bold 14px monospace'; ctx.textAlign = 'left';
-            ctx.fillText(`COMBO x${this.player.comboCount+1}`, pBarX, pBarY+38);
+            ctx.fillText(`COMBO x${this.player.comboCount+1}`, pBarX, pBarY+60);
         }
 
         // === モンスターHPバー（遅延ダメージ表現） ===
@@ -1385,6 +1673,40 @@ class Game {
     // ========================================
     // ロビー / インベントリ / クラフト（Phase 3と同じ）
     // ========================================
+    // ========================================
+    // スキル選択画面
+    // ========================================
+    drawSkillSelect(ctx) {
+        ctx.save(); ctx.globalAlpha = 1;
+        ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0,0,800,600);
+        ctx.fillStyle = '#ffcc00'; ctx.font = 'bold 28px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('LEVEL UP! Select a Skill', 400, 150);
+        const cardW = 400, cardH = 70;
+        const startY = 200;
+        for (let i = 0; i < this.skillChoices.length; i++) {
+            const skill = this.skillChoices[i];
+            const sel = i === this.skillCursor;
+            const cy = startY + i * (cardH + 15);
+            const cx = (800 - cardW) / 2;
+            ctx.fillStyle = sel ? '#1a2a3a' : '#111122';
+            roundRect(ctx, cx, cy, cardW, cardH, 8); ctx.fill();
+            ctx.strokeStyle = sel ? '#ffcc00' : '#444';
+            ctx.lineWidth = sel ? 2 : 1;
+            roundRect(ctx, cx, cy, cardW, cardH, 8); ctx.stroke();
+            if (sel) {
+                ctx.fillStyle = '#ffcc00'; ctx.font = 'bold 18px monospace'; ctx.textAlign = 'left';
+                ctx.fillText('>', cx - 20, cy + 30);
+            }
+            ctx.fillStyle = sel ? '#fff' : '#aaa'; ctx.font = 'bold 18px monospace'; ctx.textAlign = 'left';
+            ctx.fillText(skill.name, cx + 20, cy + 28);
+            ctx.fillStyle = '#888'; ctx.font = '13px monospace';
+            ctx.fillText(skill.desc, cx + 20, cy + 52);
+        }
+        ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('W/S: Select  Z: Confirm', 400, startY + this.skillChoices.length*(cardH+15) + 30);
+        ctx.restore();
+    }
+
     // ========================================
     // ボス登場演出
     // ========================================
