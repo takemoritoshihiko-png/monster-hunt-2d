@@ -1266,29 +1266,30 @@ class Monster {
     }
     draw(ctx, img) {
         if (!this.alive) return;
-        // Ice Wolf は画像なしで水色四角描画
+        // Ice Wolf描画
         if (this.isIceWolf) {
-            const col = this.hitFlashTimer > 0 ? '#ffffff' : (this.slowTimer > 0 ? '#6699aa' : '#88ccee');
-            ctx.fillStyle = col;
-            ctx.fillRect(this.x, this.y, this.width, this.height);
-            // 目
-            ctx.fillStyle = '#225588';
-            ctx.fillRect(this.x + 8, this.y + 12, 8, 6);
-            ctx.fillRect(this.x + this.width - 16, this.y + 12, 8, 6);
-            ctx.fillStyle = '#112244';
-            ctx.fillRect(this.x + 11, this.y + 14, 3, 3);
-            ctx.fillRect(this.x + this.width - 13, this.y + 14, 3, 3);
-            // 耳
-            ctx.fillStyle = col;
-            ctx.beginPath(); ctx.moveTo(this.x + 4, this.y); ctx.lineTo(this.x - 4, this.y - 12);
-            ctx.lineTo(this.x + 14, this.y); ctx.closePath(); ctx.fill();
-            ctx.beginPath(); ctx.moveTo(this.x + this.width - 14, this.y);
-            ctx.lineTo(this.x + this.width + 4, this.y - 12);
-            ctx.lineTo(this.x + this.width - 4, this.y); ctx.closePath(); ctx.fill();
-            // スロー時の氷エフェクト
+            const sw = 80, sh = 80;
+            const drawX = this.x + this.width/2 - sw/2;
+            const drawY = this.y + this.height/2 - sh/2;
+            if (img) {
+                ctx.save();
+                if (this.hitFlashTimer > 0) {
+                    ctx.globalAlpha = 0.6;
+                    ctx.drawImage(img, drawX, drawY, sw, sh);
+                    ctx.globalCompositeOperation = 'source-atop';
+                    ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fillRect(drawX, drawY, sw, sh);
+                    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+                } else {
+                    ctx.drawImage(img, drawX, drawY, sw, sh);
+                }
+                ctx.restore();
+            } else {
+                ctx.fillStyle = this.hitFlashTimer > 0 ? '#fff' : '#88ccee';
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+            }
             if (this.slowTimer > 0) {
                 ctx.strokeStyle = 'rgba(100,200,255,0.5)'; ctx.lineWidth = 2;
-                ctx.beginPath(); ctx.arc(this.x+this.width/2, this.y+this.height/2, this.width*0.6, 0, Math.PI*2); ctx.stroke();
+                ctx.beginPath(); ctx.arc(this.x+this.width/2, this.y+this.height/2, sw*0.5, 0, Math.PI*2); ctx.stroke();
             }
             return;
         }
@@ -1723,7 +1724,7 @@ class Game {
     }
 
     loadImages() {
-        const files = { player:'assets/player.png', forestDrake:'assets/forest_drake.png', giantDrake:'assets/giant_drake.png' };
+        const files = { player:'assets/player.png', forestDrake:'assets/forest_drake.png', giantDrake:'assets/giant_drake.png', iceWolf:'assets/ice_wolf.png' };
         return Promise.all(Object.entries(files).map(([k,s])=>new Promise(r=>{
             const img=new Image(); img.onload=()=>{this.images[k]=img;r();}; img.onerror=()=>{console.warn(`Load fail: ${s}`);r();}; img.src=s;
         })));
@@ -2444,7 +2445,7 @@ class Game {
         for (const arrow of this.arrows) { ctx.save(); arrow.draw(ctx); ctx.restore(); }
         for (const m of this.monsters) {
             ctx.save();
-            const mImg = m.isIceWolf ? null : (m.isBoss ? this.images.giantDrake : this.images.forestDrake);
+            const mImg = m.isIceWolf ? this.images.iceWolf : (m.isBoss ? this.images.giantDrake : this.images.forestDrake);
             m.draw(ctx, mImg);
             ctx.restore();
         }
