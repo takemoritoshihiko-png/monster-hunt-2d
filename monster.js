@@ -67,6 +67,42 @@ export class Monster {
         // 巡回行動
         this.patrolTarget = { x: this.spawnX, y: this.spawnY };
         this.patrolTimer = 0;
+        // 弱点部位マップ { zone: { yMin, yMax, xMin, xMax (比率), mult, label } }
+        this.weakSpots = this._initWeakSpots();
+        // 攻撃予備動作
+        this.telegraphTimer = 0;   // 予備動作中の残り時間(ms)
+        this.telegraphing = false;
+    }
+    _initWeakSpots() {
+        const n = this.name;
+        if (n === 'Forest Drake' || n === 'Elder Drake') return [
+            { yMin: 0, yMax: 0.33, xMin: 0, xMax: 1, mult: 2.0, label: 'WEAK!' },    // 頭
+            { yMin: 0.33, yMax: 0.66, xMin: 0.2, xMax: 0.8, mult: 2.0, label: 'WEAK!' }, // 腹
+            { yMin: 0.66, yMax: 1, xMin: 0, xMax: 1, mult: 0.5, label: 'HARD' },     // 硬い
+        ];
+        if (n === 'Ice Wolf') return [
+            { yMin: 0.66, yMax: 1, xMin: 0, xMax: 1, mult: 2.0, label: 'WEAK!' },    // 脚
+            { yMin: 0, yMax: 0.5, xMin: 0, xMax: 1, mult: 2.0, label: 'WEAK!' },     // 背中
+        ];
+        if (n === 'Giant Drake') return [
+            { yMin: 0, yMax: 0.25, xMin: 0, xMax: 1, mult: 2.0, label: 'WEAK!' },    // 頭
+            { yMin: 0.2, yMax: 0.8, xMin: 0, xMax: 0.15, mult: 2.0, label: 'WEAK!' }, // 左翼
+            { yMin: 0.2, yMax: 0.8, xMin: 0.85, xMax: 1, mult: 2.0, label: 'WEAK!' }, // 右翼
+            { yMin: 0.3, yMax: 0.7, xMin: 0.3, xMax: 0.7, mult: 0.5, label: 'HARD' }, // 胴体硬い
+        ];
+        return [];
+    }
+    /** ヒット座標から弱点倍率を返す */
+    getWeakSpotMult(hitX, hitY) {
+        if (this.weakSpots.length === 0) return { mult: 1.0, label: '' };
+        const relX = (hitX - this.x) / this.width;
+        const relY = (hitY - this.y) / this.height;
+        for (const ws of this.weakSpots) {
+            if (relY >= ws.yMin && relY <= ws.yMax && relX >= ws.xMin && relX <= ws.xMax) {
+                return { mult: ws.mult, label: ws.label };
+            }
+        }
+        return { mult: 1.0, label: '' };
     }
     update(dt, player, game) {
         if (!this.alive) return;
@@ -226,11 +262,22 @@ export class Monster {
             this.state='charge_windup'; this.chargeWindupTimer=this.chargeWindupDuration;
             Sound.playChargeWarning(); this.chargeCooldownTimer=this.chargeCooldown; return;
         }
-        // 攻撃
+        // 攻撃（予備動作付き）
         if (dist<=this.attackRange) {
             this.state='attack';
             if (this.attackTimer<=0) {
-                const result = player.takeDamage(this.attackDamage);
+                // 予備動作フェーズ
+                if (!this.telegraphing) {
+                    this.telegraphing = true;
+                    this.telegraphTimer = 800; // 0.8秒予告
+                    return;
+                }
+                this.telegraphTimer -= dt * 1000;
+                if (this.telegraphTimer > 0) return; // まだ予告中
+                this.telegraphing = false;
+                // 予備動作を見逃した場合ダメージ1.5倍
+                const telegraphDmg = player.dashTimer > 0 ? this.attackDamage : Math.floor(this.attackDamage * 1.5);
+                const result = player.takeDamage(telegraphDmg);
                 this.attackTimer=this.attackCooldown;
                 if (result === 'hit' || result === 'block') {
                     if (game) game.subQuestState.damageTaken++;
@@ -392,6 +439,21 @@ export class Monster {
         } else {
             ctx.fillStyle=this.hitFlashTimer>0?'#fff':(this.state==='charging'?'#ff6633':this.color);
             ctx.fillRect(this.x,this.y,this.width,this.height);
+        }
+        // 予備動作エフェクト
+        if (this.telegraphing) {
+            const pulse = Math.sin(Date.now() * 0.015) > 0;
+            if (pulse) {
+                ctx.save(); ctx.globalAlpha = 0.25;
+                ctx.fillStyle = '#ff2222';
+                ctx.fillRect(this.x-3, this.y-3, this.width+6, this.height+6);
+                ctx.restore();
+            }
+            // ！マーク点滅
+            ctx.fillStyle = '#ff4444'; ctx.font = 'bold 20px monospace'; ctx.textAlign = 'center';
+            if (Math.sin(Date.now() * 0.01) > 0) {
+                ctx.fillText('!', this.x + this.width/2, this.y - 15);
+            }
         }
         // 怒りフラッシュ
         if (this.enraged && this.enrageFlashTimer > 250) {

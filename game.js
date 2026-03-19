@@ -37,6 +37,11 @@ class Game {
         // クラフト画面タブ
         this.craftTab = 0; // 0=CRAFT, 1=UPGRADE
         this.upgradeCursor = 0;
+        // 必殺技表示
+        this.slowMoTimer = 0;
+        this.ultimateName = '';
+        this.ultimateWeaponName = '';
+        this.ultimateDisplayTimer = 0;
         // レベルアップ・スキル選択
         this.levelUpTimer = 0;  // LEVEL UP!表示タイマー
         this.skillSelectActive = false;
@@ -481,6 +486,18 @@ class Game {
                 }
             }
             if (key==='x') this.player.startBlock();
+            if (key==='shift') {
+                // ダッシュ回避
+                let ddx=0, ddy=0;
+                if (this.keys['w']||this.keys['arrowup']) ddy=-1;
+                if (this.keys['s']||this.keys['arrowdown']) ddy=1;
+                if (this.keys['a']||this.keys['arrowleft']) ddx=-1;
+                if (this.keys['d']||this.keys['arrowright']) ddx=1;
+                if (this.player.dodge(ddx, ddy)) {
+                    this.damageNumbers.push(new DamageNumber(this.player.x+this.player.width/2, this.player.y-20, 0, '#44ddff', 'EVADE!'));
+                }
+            }
+            if (key==='r') this.tryUltimate();
             if (key==='q') { this.player.cycleWeapon(); this.weaponSwitchMessage=`Equipped: ${this.player.weapon.name}`; this.weaponSwitchTimer=1500; }
         });
         window.addEventListener('keyup',(e)=>{
@@ -534,6 +551,53 @@ class Game {
         if (this.inventory.alreadyOwns(r)) {this.craftMessage='Already owned!';this.craftMessageTimer=1500;return;}
         if (this.inventory.craft(r)) {this.craftMessage=`Crafted: ${r.name}!`;this.craftMessageTimer=2000;}
         else {this.craftMessage='Not enough materials!';this.craftMessageTimer=1500;}
+    }
+
+    /** 必殺技発動 */
+    tryUltimate() {
+        if (!this.player || this.player.ultimateGauge < 100) return;
+        this.player.ultimateGauge = 0;
+        this.player.ultimateActive = true;
+        this.player.ultimateTimer = 500; // 0.5秒スローモーション
+        this.slowMoTimer = 500;
+        const style = this.player.weapon.style;
+        const px = this.player.x+this.player.width/2, py = this.player.y+this.player.height/2;
+        // 武器別必殺技名
+        const ultNames = {
+            combo3:'乱舞斬り', charge:'大地割り', bow:'矢の雨',
+            frost:'吹雪', hammer:'天地崩壊', poison:'毒霧'
+        };
+        this.ultimateName = ultNames[style] || 'Ultimate';
+        this.ultimateWeaponName = this.player.weapon.name;
+        this.ultimateDisplayTimer = 1500;
+        // 武器別効果
+        if (style === 'combo3') {
+            // 乱舞斬り: 前方5連撃
+            for (const m of this.monsters) {
+                if (!m.alive) continue;
+                const d=Math.sqrt((m.x+m.width/2-px)**2+(m.y+m.height/2-py)**2);
+                if (d < 150) { for (let i=0;i<5;i++) setTimeout(()=>{ m.takeDamage(Math.floor(this.player.weapon.damage*1.5)); this.spawnHitParticles(m.x+m.width/2,m.y+m.height/2,5,true); }, i*100); }
+            }
+        } else if (style === 'charge') {
+            // 大地割り: 全モンスター200ダメージ
+            for (const m of this.monsters) { if (m.alive) { m.takeDamage(200); this.spawnHitParticles(m.x+m.width/2,m.y+m.height/2,15,true); if (!m.alive) { Sound.playMonsterDie(); this.onMonsterDefeated(m); } } }
+        } else if (style === 'bow') {
+            // 矢の雨: 10本の矢
+            for (let i=0;i<10;i++) { const ax=px-200+Math.random()*400; this.arrows.push(new Arrow(ax,-50,'down',80)); }
+        } else if (style === 'frost') {
+            // 吹雪: 全モンスター凍結+150ダメージ
+            for (const m of this.monsters) { if (m.alive) { m.frozenTimer=3000; m.takeDamage(150); this.spawnHitParticles(m.x+m.width/2,m.y+m.height/2,10,true); for(let i=0;i<8;i++){const a=Math.random()*Math.PI*2;this.particles.push(new Particle(m.x+m.width/2,m.y+m.height/2,Math.cos(a)*100,Math.sin(a)*100,'#aaeeff',500,3));} if (!m.alive) { Sound.playMonsterDie(); this.onMonsterDefeated(m); } } }
+        } else if (style === 'hammer') {
+            // 天地崩壊: 300ダメージ+ノックバック
+            for (const m of this.monsters) { if (m.alive) { const d=Math.sqrt((m.x-px)**2+(m.y-py)**2)||1; m.takeDamage(300,(m.x-px)/d*20,(m.y-py)/d*20); this.spawnHitParticles(m.x+m.width/2,m.y+m.height/2,15,true); if (!m.alive) { Sound.playMonsterDie(); this.onMonsterDefeated(m); } } }
+            this.shakeTimer = 200; this.shakeIntensity = 10;
+        } else if (style === 'poison') {
+            // 毒霧: 全モンスター毒5秒
+            for (const m of this.monsters) { if (m.alive) { m.poisonTimer=5000; m.poisonTickTimer=1000; for(let i=0;i<6;i++){const a=Math.random()*Math.PI*2;this.particles.push(new Particle(m.x+m.width/2,m.y+m.height/2,Math.cos(a)*60,Math.sin(a)*60,'#44cc44',600,3));} } }
+        }
+        // エフェクト
+        for (let i=0;i<20;i++) { const a=Math.random()*Math.PI*2,sp=100+Math.random()*100; this.particles.push(new Particle(px,py,Math.cos(a)*sp,Math.sin(a)*sp-50,'#ffcc00',600+Math.random()*400,4)); }
+        Sound.playLevelUp();
     }
 
     handleAttack() {
@@ -657,7 +721,12 @@ class Game {
         const style = this.player.weapon.style;
         const partDmgMult = style === 'hammer' ? 1.5 : 1.0;
         const hx = monster.x+monster.width/2, hy = monster.y+monster.height/2;
-        const { partBroken } = monster.takeDamage(Math.floor(dmg * partDmgMult), (dx/dist)*kb*comboMult, (dy/dist)*kb*comboMult, hx, hy);
+        // 弱点部位倍率
+        const { mult: spotMult, label: spotLabel } = monster.getWeakSpotMult(hx, hy);
+        dmg = Math.floor(dmg * partDmgMult * spotMult);
+        const { partBroken } = monster.takeDamage(dmg, (dx/dist)*kb*comboMult, (dy/dist)*kb*comboMult, hx, hy);
+        // 必殺技ゲージ加算
+        this.player.addUltGauge(10);
         // Frost Blade: 凍結カウンター
         if (style === 'frost' && monster.alive && monster.frozenTimer <= 0) {
             monster.frostCount++;
@@ -681,6 +750,8 @@ class Game {
             this.droppedItems.push(item);
         }
         if (isWeak && !partBroken) { numColor = '#ffaa22'; numLabel = 'WEAK!'; }
+        if (!partBroken && !isWeak && spotLabel === 'WEAK!') { numColor = '#ffaa22'; numLabel = 'WEAK!'; this.shakeTimer = 40; this.shakeIntensity = 3; }
+        if (spotLabel === 'HARD') { numColor = '#888888'; numLabel = 'HARD'; }
         this.damageNumbers.push(new DamageNumber(hx, hy - 20, dmg, numColor, numLabel));
         // ヒットパーティクル
         const isFinish = this.player.comboCount === 2;
@@ -819,6 +890,8 @@ class Game {
         if (this.shakeTimer>0) this.shakeTimer-=dt*1000;
         if (this.levelUpTimer>0) this.levelUpTimer-=dt*1000;
         if (this.saveIndicatorTimer>0) this.saveIndicatorTimer-=dt*1000;
+        if (this.slowMoTimer>0) { this.slowMoTimer-=dt*1000; dt *= 0.3; } // スローモーション
+        if (this.ultimateDisplayTimer>0) this.ultimateDisplayTimer-=dt*1000;
 
         // ダメージ数値更新
         for (const dn of this.damageNumbers) dn.update(dt);
@@ -1170,6 +1243,36 @@ class Game {
             ctx.fillText(`Lv${this.player.level}  MAX`, pBarX, expBarY + 22);
         }
 
+        // スタミナバー
+        const stBarY = expBarY + 20;
+        roundRect(ctx, pBarX, stBarY, pBarW*0.6, 6, 2);
+        ctx.fillStyle='#222'; ctx.fill();
+        ctx.save(); roundRect(ctx, pBarX, stBarY, pBarW*0.6, 6, 2); ctx.clip();
+        ctx.fillStyle='#44cc44'; ctx.fillRect(pBarX, stBarY, pBarW*0.6*(this.player.stamina/this.player.maxStamina), 6);
+        ctx.restore();
+        // 必殺技ゲージ
+        const ultBarY = stBarY + 12;
+        roundRect(ctx, pBarX, ultBarY, pBarW*0.6, 8, 3);
+        ctx.fillStyle='#1a1a00'; ctx.fill();
+        ctx.save(); roundRect(ctx, pBarX, ultBarY, pBarW*0.6, 8, 3); ctx.clip();
+        ctx.fillStyle = this.player.ultimateGauge >= 100 ? '#ffcc00' : '#886600';
+        ctx.fillRect(pBarX, ultBarY, pBarW*0.6*(this.player.ultimateGauge/100), 8);
+        ctx.restore();
+        roundRect(ctx, pBarX, ultBarY, pBarW*0.6, 8, 3); ctx.strokeStyle='#555'; ctx.lineWidth=1; ctx.stroke();
+        if (this.player.ultimateGauge >= 100) {
+            ctx.fillStyle='#ffcc00'; ctx.font='bold 10px monospace'; ctx.textAlign='left';
+            ctx.fillText('R: ULTIMATE READY!', pBarX + pBarW*0.6+5, ultBarY+8);
+        }
+        // 必殺技名表示
+        if (this.ultimateDisplayTimer > 0) {
+            ctx.save();
+            ctx.globalAlpha = Math.min(1, this.ultimateDisplayTimer/300);
+            ctx.fillStyle = '#ffcc00'; ctx.font = 'bold 28px monospace'; ctx.textAlign = 'center';
+            ctx.fillText(this.ultimateWeaponName, this.W/2, this.H/2-30);
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 22px monospace';
+            ctx.fillText(this.ultimateName, this.W/2, this.H/2+5);
+            ctx.restore();
+        }
         // コンボ/チャージ表示
         const wStyle = this.player.weapon.style;
         if (this.player.comboTimer > 0 && (wStyle==='combo3'||wStyle==='poison')) {
@@ -1267,7 +1370,7 @@ class Game {
             ctx.fillText(this.weaponSwitchMessage,400,400);
         }
         ctx.fillStyle='rgba(255,255,255,0.5)';ctx.font='12px monospace';ctx.textAlign='center';
-        ctx.fillText('WASD:Move  Z:Attack  X:Block/Parry  Q:Switch  I:Inv  C:Craft',400,590);
+        ctx.fillText('WASD:Move  Z:Atk  X:Block  Shift:Dodge  R:Ultimate  Q:Switch',this.W/2,this.H-10);
         // ミニマップ描画
         this.drawMinimap(ctx);
     }

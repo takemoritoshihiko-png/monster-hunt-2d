@@ -34,6 +34,17 @@ export class Player {
         // スロー効果（Ice Wolfの氷の息）
         this.slowTimer = 0;
         this.baseSpeed = this.speed;
+        // ダッシュ回避
+        this.dashTimer = 0;          // ダッシュ中残り(ms)
+        this.dashDuration = 400;     // ダッシュ持続
+        this.dashCooldown = 0;       // ダッシュCD
+        this.dashDirX = 0; this.dashDirY = 0;
+        // スタミナ（回避消費）
+        this.staminaRegenDelay = 0;  // 消費後の回復遅延
+        // 必殺技ゲージ
+        this.ultimateGauge = 0;      // 0〜100
+        this.ultimateActive = false;
+        this.ultimateTimer = 0;
         // レベル・EXPシステム
         this.level = 1;
         this.exp = 0;
@@ -136,7 +147,47 @@ export class Player {
                 this._frostSecondHitReady = true;
             }
         }
+        // ダッシュ中は高速移動+無敵
+        if (this.dashTimer > 0) {
+            this.dashTimer -= dt * 1000;
+            this.x += this.dashDirX * this.baseSpeed * 2.5 * dt;
+            this.y += this.dashDirY * this.baseSpeed * 2.5 * dt;
+            this.x = Math.max(10, Math.min(WORLD_W-this.width-10, this.x));
+            this.y = Math.max(10, Math.min(WORLD_H-this.height-10, this.y));
+            this.invincibleTimer = Math.max(this.invincibleTimer, 50);
+        }
+        if (this.dashCooldown > 0) this.dashCooldown -= dt * 1000;
+        // スタミナ自動回復（5秒で全回復=20/秒）
+        if (this.staminaRegenDelay > 0) this.staminaRegenDelay -= dt * 1000;
+        else this.stamina = Math.min(this.maxStamina, this.stamina + 20 * dt);
+        // 必殺技タイマー
+        if (this.ultimateTimer > 0) this.ultimateTimer -= dt * 1000;
+        if (this.ultimateTimer <= 0) this.ultimateActive = false;
         this.equipBestArmor();
+    }
+    /** ダッシュ回避 */
+    dodge(dx, dy) {
+        if (this.dashTimer > 0 || this.dashCooldown > 0) return false;
+        if (this.stamina < 30) return false;
+        this.stamina -= 30;
+        this.staminaRegenDelay = 1000;
+        this.dashTimer = this.dashDuration;
+        this.dashCooldown = 600;
+        this.invincibleTimer = this.dashDuration;
+        // 入力方向、なければ向き方向
+        if (dx === 0 && dy === 0) {
+            switch(this.facing) {
+                case 'up': dy=-1; break; case 'down': dy=1; break;
+                case 'left': dx=-1; break; case 'right': dx=1; break;
+            }
+        }
+        const len = Math.sqrt(dx*dx+dy*dy) || 1;
+        this.dashDirX = dx/len; this.dashDirY = dy/len;
+        return true;
+    }
+    /** 必殺技ゲージ加算 */
+    addUltGauge(amount) {
+        this.ultimateGauge = Math.min(100, this.ultimateGauge + amount);
     }
     attack() {
         if (this.attackCooldown > 0) return null;
@@ -247,6 +298,13 @@ export class Player {
         if (this.parryBonus > 0) {
             ctx.fillStyle = `rgba(255,200,50,${Math.min(1,this.parryBonus/300)*0.3})`;
             ctx.beginPath(); ctx.arc(this.x+this.width/2, this.y+this.height/2, 26, 0, Math.PI*2); ctx.fill();
+        }
+        // ダッシュ残像
+        if (this.dashTimer > 0) {
+            ctx.save(); ctx.globalAlpha = 0.3;
+            ctx.fillStyle = '#aaddff';
+            ctx.fillRect(this.x - this.dashDirX*15, this.y - this.dashDirY*15, this.width, this.height);
+            ctx.restore();
         }
     }
     drawAttackEffect(ctx) {
