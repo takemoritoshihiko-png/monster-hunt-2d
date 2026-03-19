@@ -578,6 +578,47 @@ class Inventory {
         }
         return null;
     }
+    /** セーブ用にシリアライズ */
+    serialize() {
+        return {
+            materials: { ...this.materials },
+            weapons: this.weapons.map(w => ({
+                id: this.getWeaponId(w) || 'basicSword',
+                upgradeLevel: w.upgradeLevel || 0,
+            })),
+            armors: this.armors.map(a => ({
+                id: 'drakeArmor',
+                upgradeLevel: a.upgradeLevel || 0,
+            })),
+            clearedQuests: [...this.clearedQuests],
+            bestTimes: { ...this.bestTimes },
+            title: this.title,
+        };
+    }
+    /** セーブデータから復元 */
+    deserialize(data) {
+        if (!data) return;
+        this.materials = data.materials || {};
+        this.weapons = (data.weapons || []).map(w => {
+            const base = WEAPONS[w.id];
+            if (!base) return null;
+            const weapon = new Weapon(base.name, base.baseDamage, base.range, base.cooldown,
+                base.knockback, base.type, base.style, base.desc);
+            weapon.upgradeLevel = w.upgradeLevel || 0;
+            weapon.damage = weapon.getEffectiveDamage();
+            return weapon;
+        }).filter(w => w !== null);
+        if (this.weapons.length === 0) this.weapons = [WEAPONS.basicSword];
+        this.armors = (data.armors || []).map(a => {
+            const armor = new Armor(ARMORS.drakeArmor.name, ARMORS.drakeArmor.defense, ARMORS.drakeArmor.damageMultiplier);
+            armor.upgradeLevel = a.upgradeLevel || 0;
+            if (armor.upgradeLevel > 0) armor.damageMultiplier = ARMOR_UPGRADE_MULT[armor.upgradeLevel];
+            return armor;
+        });
+        this.clearedQuests = new Set(data.clearedQuests || []);
+        this.bestTimes = data.bestTimes || {};
+        this.title = data.title || '';
+    }
 }
 
 // ========================================
@@ -1316,7 +1357,15 @@ class Game {
         // 風音
         this.windNode = null;
 
+        // セーブ関連
+        this.saveIndicatorTimer = 0; // 「SAVED ✓」表示タイマー
+        this.saveMenuActive = false;
+        this.saveMenuCursor = 0;
+        this.saveMenuConfirm = false; // New Game確認中
+
         this.setupInput();
+        // 起動時に自動ロード
+        this.loadGame();
         this.loadImages().then(() => {
             this.imagesLoaded = true;
             requestAnimationFrame((t) => this.loop(t));
@@ -1437,6 +1486,113 @@ class Game {
         this.windNode = null;
     }
 
+    /** ロビーに戻る（セーブ付き） */
+    _returnToLobbyWithSave() {
+        // プレイヤーデータをセーブ用に保持
+        if (this.player) {
+            this._savedPlayerLevel = this.player.level;
+            this._savedPlayerExp = this.player.exp;
+            this._savedPlayerMaxHp = this.player.maxHp;
+            this._savedBonusDamage = this.player.bonusDamage;
+            this._savedBaseSpeed = this.player.baseSpeed;
+            this._savedSkills = this.player.acquiredSkills;
+            this._savedSkillMeleeMult = this.player.skillMeleeMult;
+            this._savedSkillBowCdMult = this.player.skillBowCdMult;
+            this._savedSkillDefMult = this.player.skillDefMult;
+            this._savedSkillAtkSpdMult = this.player.skillAtkSpdMult;
+            this._savedSkillExtraDrop = this.player.skillExtraDrop;
+            this._savedSkillShowHpNum = this.player.skillShowHpNum;
+        }
+        this.state = 'lobby';
+        this.saveGame();
+    }
+
+    /** ゲームデータを保存 */
+    saveGame() {
+        try {
+            const data = {
+                version: 1,
+                inventory: this.inventory.serialize(),
+                playerLevel: this.player ? this.player.level : (this._savedPlayerLevel || 1),
+                playerExp: this.player ? this.player.exp : (this._savedPlayerExp || 0),
+                playerMaxHp: this.player ? this.player.maxHp : (this._savedPlayerMaxHp || 100),
+                playerBonusDamage: this.player ? this.player.bonusDamage : (this._savedBonusDamage || 0),
+                playerBaseSpeed: this.player ? this.player.baseSpeed : (this._savedBaseSpeed || 260),
+                acquiredSkills: this.player ? this.player.acquiredSkills : (this._savedSkills || []),
+                skillMeleeMult: this.player ? this.player.skillMeleeMult : 1,
+                skillBowCdMult: this.player ? this.player.skillBowCdMult : 1,
+                skillDefMult: this.player ? this.player.skillDefMult : 1,
+                skillAtkSpdMult: this.player ? this.player.skillAtkSpdMult : 1,
+                skillExtraDrop: this.player ? this.player.skillExtraDrop : 0,
+                skillShowHpNum: this.player ? this.player.skillShowHpNum : false,
+                totalHunts: this.totalHunts,
+            };
+            localStorage.setItem('monsterHunt2D_save', JSON.stringify(data));
+            this.saveIndicatorTimer = 2000;
+        } catch (e) { console.warn('Save failed:', e); }
+    }
+
+    /** ゲームデータをロード */
+    loadGame() {
+        try {
+            const raw = localStorage.getItem('monsterHunt2D_save');
+            if (!raw) return false;
+            const data = JSON.parse(raw);
+            this.inventory.deserialize(data.inventory);
+            // プレイヤーが存在しない（ロビー中）場合に復元用に保持
+            this._savedPlayerLevel = data.playerLevel || 1;
+            this._savedPlayerExp = data.playerExp || 0;
+            this._savedPlayerMaxHp = data.playerMaxHp || 100;
+            this._savedBonusDamage = data.playerBonusDamage || 0;
+            this._savedBaseSpeed = data.playerBaseSpeed || 260;
+            this._savedSkills = data.acquiredSkills || [];
+            this._savedSkillMeleeMult = data.skillMeleeMult || 1;
+            this._savedSkillBowCdMult = data.skillBowCdMult || 1;
+            this._savedSkillDefMult = data.skillDefMult || 1;
+            this._savedSkillAtkSpdMult = data.skillAtkSpdMult || 1;
+            this._savedSkillExtraDrop = data.skillExtraDrop || 0;
+            this._savedSkillShowHpNum = data.skillShowHpNum || false;
+            this.totalHunts = data.totalHunts || 0;
+            // bestTimesも復元
+            this.inventory.bestTimes = data.inventory.bestTimes || {};
+            return true;
+        } catch (e) { console.warn('Load failed:', e); return false; }
+    }
+
+    /** プレイヤー生成時にセーブデータのステータスを適用 */
+    applyLoadedStats(player) {
+        if (!this._savedPlayerLevel) return;
+        player.level = this._savedPlayerLevel;
+        player.exp = this._savedPlayerExp;
+        player.maxHp = this._savedPlayerMaxHp;
+        player.hp = player.maxHp;
+        player.bonusDamage = this._savedBonusDamage;
+        player.baseSpeed = this._savedBaseSpeed;
+        player.speed = player.baseSpeed;
+        player.acquiredSkills = this._savedSkills || [];
+        player.skillMeleeMult = this._savedSkillMeleeMult || 1;
+        player.skillBowCdMult = this._savedSkillBowCdMult || 1;
+        player.skillDefMult = this._savedSkillDefMult || 1;
+        player.skillAtkSpdMult = this._savedSkillAtkSpdMult || 1;
+        player.skillExtraDrop = this._savedSkillExtraDrop || 0;
+        player.skillShowHpNum = this._savedSkillShowHpNum || false;
+    }
+
+    /** データリセット */
+    resetGame() {
+        try { localStorage.removeItem('monsterHunt2D_save'); localStorage.removeItem('mh2d_bestTimes'); localStorage.removeItem('mh2d_totalHunts'); } catch(e){}
+        this.inventory = new Inventory();
+        this.totalHunts = 0;
+        this._savedPlayerLevel = 1; this._savedPlayerExp = 0;
+        this._savedPlayerMaxHp = 100; this._savedBonusDamage = 0;
+        this._savedBaseSpeed = 260; this._savedSkills = [];
+        this._savedSkillMeleeMult = 1; this._savedSkillBowCdMult = 1;
+        this._savedSkillDefMult = 1; this._savedSkillAtkSpdMult = 1;
+        this._savedSkillExtraDrop = 0; this._savedSkillShowHpNum = false;
+        this.player = null;
+        this.saveMenuActive = false; this.saveMenuConfirm = false;
+    }
+
     loadImages() {
         const files = { player:'assets/player.png', forestDrake:'assets/forest_drake.png', giantDrake:'assets/giant_drake.png' };
         return Promise.all(Object.entries(files).map(([k,s])=>new Promise(r=>{
@@ -1447,6 +1603,7 @@ class Game {
     startQuest(quest) {
         this.currentQuest = quest;
         this.player = new Player(this.canvas.width/2-16, this.canvas.height-80, this.inventory);
+        this.applyLoadedStats(this.player);
         this.monsters = quest.monsters.map(m=>new Monster(m.name,m.x,m.y,m.config));
         this.droppedItems=[]; this.arrows=[]; this.particles=[]; this.iceBreaths=[]; this.damageNumbers=[];
         this.questSuccess=false; this.shakeTimer=0; this.resultAnimTimer=0;
@@ -1511,7 +1668,25 @@ class Game {
             this.keys[key] = true;
             // タイトル画面 → ロビーへ
             if (this.state==='title') { this.state='lobby'; return; }
+            // セーブメニュー
+            if (this.saveMenuActive) {
+                if (this.saveMenuConfirm) {
+                    if (key==='y') { this.resetGame(); this.saveMenuActive=false; this.saveMenuConfirm=false; }
+                    else if (key==='n'||key==='escape') { this.saveMenuConfirm=false; }
+                } else {
+                    if (key==='arrowup'||key==='w') this.saveMenuCursor=Math.max(0,this.saveMenuCursor-1);
+                    else if (key==='arrowdown'||key==='s') this.saveMenuCursor=Math.min(2,this.saveMenuCursor+1);
+                    else if (key==='z'||key==='enter') {
+                        if (this.saveMenuCursor===0) { this.saveGame(); this.saveMenuActive=false; }
+                        else if (this.saveMenuCursor===1) { this.loadGame(); this.saveMenuActive=false; }
+                        else if (this.saveMenuCursor===2) { this.saveMenuConfirm=true; }
+                    }
+                    else if (key==='escape') { this.saveMenuActive=false; }
+                }
+                return;
+            }
             if (this.state==='lobby') {
+                if (key==='escape') { this.saveMenuActive=true; this.saveMenuCursor=0; this.saveMenuConfirm=false; return; }
                 if (key==='arrowup'||key==='w') this.lobbyCursor=Math.max(0,this.lobbyCursor-1);
                 else if (key==='arrowdown'||key==='s') this.lobbyCursor=Math.min(QUESTS.length-1,this.lobbyCursor+1);
                 else if (key==='enter'||key==='z') {
@@ -1523,8 +1698,8 @@ class Game {
                 if (key==='c') {this.state='craft';this.craftCursor=0;this.craftTab=0;this._returnToLobby=true;return;}
                 return;
             }
-            if (this.state==='result') { if (key==='r'||key==='enter') this.state='lobby'; return; }
-            if (this.state==='gameover') { if (key==='r') this.state='lobby'; return; }
+            if (this.state==='result') { if (key==='r'||key==='enter') this._returnToLobbyWithSave(); return; }
+            if (this.state==='gameover') { if (key==='r') this._returnToLobbyWithSave(); return; }
             if (key==='i') {
                 if (this.state==='inventory') {this.state=this._returnToLobby?'lobby':'playing';this._returnToLobby=false;}
                 else if (this.state==='playing') {this.state='inventory';this._returnToLobby=false;}
@@ -1869,6 +2044,22 @@ class Game {
             this.resultTimer=this.resultDuration; this.resultAnimTimer=0;
             this.spawnVictoryParticles();
             this.state='result';
+            // クエスト完了時オートセーブ
+            if (this.player) {
+                this._savedPlayerLevel = this.player.level;
+                this._savedPlayerExp = this.player.exp;
+                this._savedPlayerMaxHp = this.player.maxHp;
+                this._savedBonusDamage = this.player.bonusDamage;
+                this._savedBaseSpeed = this.player.baseSpeed;
+                this._savedSkills = this.player.acquiredSkills;
+                this._savedSkillMeleeMult = this.player.skillMeleeMult;
+                this._savedSkillBowCdMult = this.player.skillBowCdMult;
+                this._savedSkillDefMult = this.player.skillDefMult;
+                this._savedSkillAtkSpdMult = this.player.skillAtkSpdMult;
+                this._savedSkillExtraDrop = this.player.skillExtraDrop;
+                this._savedSkillShowHpNum = this.player.skillShowHpNum;
+            }
+            this.saveGame();
         }
     }
 
@@ -1887,6 +2078,7 @@ class Game {
         if (this.weaponSwitchTimer>0) this.weaponSwitchTimer-=dt*1000;
         if (this.shakeTimer>0) this.shakeTimer-=dt*1000;
         if (this.levelUpTimer>0) this.levelUpTimer-=dt*1000;
+        if (this.saveIndicatorTimer>0) this.saveIndicatorTimer-=dt*1000;
 
         // ダメージ数値更新
         for (const dn of this.damageNumbers) dn.update(dt);
@@ -1914,13 +2106,13 @@ class Game {
         if (this.state==='result') {
             this.resultAnimTimer += dt;
             this.resultTimer-=dt;
-            if (this.resultTimer<=0) this.state='lobby';
+            if (this.resultTimer<=0) { this._returnToLobbyWithSave(); }
             return;
         }
         if (this.state==='gameover') {
             this.resultAnimTimer += dt;
             this.resultTimer-=dt;
-            if (this.resultTimer<=0) this.state='lobby';
+            if (this.resultTimer<=0) { this._returnToLobbyWithSave(); }
             return;
         }
         // ボス登場演出
@@ -2047,6 +2239,54 @@ class Game {
             case 'gameover': this.drawField(ctx); this.drawGameOver(ctx); break;
             case 'result': this.drawField(ctx); this.drawQuestComplete(ctx); break;
         }
+        // セーブインジケーター（右上）
+        if (this.saveIndicatorTimer > 0) {
+            const a = Math.min(1, this.saveIndicatorTimer / 500);
+            ctx.globalAlpha = a;
+            ctx.fillStyle = '#44cc44'; ctx.font = 'bold 14px monospace'; ctx.textAlign = 'right';
+            ctx.fillText('SAVED \u2713', 790, 20);
+            ctx.globalAlpha = 1;
+        }
+        // セーブメニュー
+        if (this.saveMenuActive) {
+            this.drawSaveMenu(ctx);
+        }
+        ctx.restore();
+    }
+
+    drawSaveMenu(ctx) {
+        ctx.save(); ctx.globalAlpha = 1;
+        ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(0, 0, 800, 600);
+        const pw = 300, ph = 220, px = (800-pw)/2, py = (600-ph)/2;
+        ctx.fillStyle = '#1a1a2e';
+        roundRect(ctx, px, py, pw, ph, 10); ctx.fill();
+        ctx.strokeStyle = '#cc8844'; ctx.lineWidth = 2;
+        roundRect(ctx, px, py, pw, ph, 10); ctx.stroke();
+        ctx.fillStyle = '#cc8844'; ctx.font = 'bold 20px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('MENU', 400, py + 35);
+        if (this.saveMenuConfirm) {
+            ctx.fillStyle = '#ff4444'; ctx.font = '14px monospace';
+            ctx.fillText('Reset all data?', 400, py + 90);
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 16px monospace';
+            ctx.fillText('Y: Yes   N: No', 400, py + 130);
+        } else {
+            const items = ['Save Game', 'Load Game', 'New Game (Reset)'];
+            for (let i = 0; i < items.length; i++) {
+                const sel = i === this.saveMenuCursor;
+                const iy = py + 65 + i * 40;
+                if (sel) {
+                    ctx.fillStyle = 'rgba(200,140,60,0.15)';
+                    roundRect(ctx, px+20, iy-12, pw-40, 30, 4); ctx.fill();
+                    ctx.fillStyle = '#ffcc44'; ctx.font = 'bold 14px monospace'; ctx.textAlign = 'left';
+                    ctx.fillText('>', px + 30, iy + 5);
+                }
+                ctx.fillStyle = sel ? '#fff' : '#aaa';
+                ctx.font = sel ? 'bold 14px monospace' : '14px monospace'; ctx.textAlign = 'left';
+                ctx.fillText(items[i], px + 50, iy + 5);
+            }
+        }
+        ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = '11px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('Esc: Close', 400, py + ph - 15);
         ctx.restore();
     }
 
