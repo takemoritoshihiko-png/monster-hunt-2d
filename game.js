@@ -561,19 +561,43 @@ class Player {
         this.invincibleTimer = this.invincibleDuration;
     }
 
-    draw(ctx) {
+    draw(ctx, playerImage) {
+        // 無敵時間中は点滅
         if (this.invincibleTimer > 0 && Math.floor(this.invincibleTimer / 80) % 2 === 0) return;
-        ctx.fillStyle = this.armor ? '#aaddff' : '#ffffff';
-        ctx.fillRect(this.x, this.y, this.width, this.height);
-        ctx.fillStyle = '#88ccff';
-        const cx = this.x + this.width / 2;
-        const cy = this.y + this.height / 2;
-        switch (this.facing) {
-            case 'up':    ctx.fillRect(cx - 4, this.y, 8, 6); break;
-            case 'down':  ctx.fillRect(cx - 4, this.y + this.height - 6, 8, 6); break;
-            case 'left':  ctx.fillRect(this.x, cy - 4, 6, 8); break;
-            case 'right': ctx.fillRect(this.x + this.width - 6, cy - 4, 6, 8); break;
+
+        const spriteW = 64;
+        const spriteH = 64;
+        // スプライトの描画位置（当たり判定の中心にスプライトの中心を合わせる）
+        const drawX = this.x + this.width / 2 - spriteW / 2;
+        const drawY = this.y + this.height / 2 - spriteH / 2;
+
+        if (playerImage) {
+            ctx.save();
+            // 左向き時は左右反転
+            if (this.facing === 'left') {
+                ctx.translate(drawX + spriteW, drawY);
+                ctx.scale(-1, 1);
+                ctx.drawImage(playerImage, 0, 0, spriteW, spriteH);
+            } else {
+                ctx.drawImage(playerImage, drawX, drawY, spriteW, spriteH);
+            }
+            ctx.restore();
+        } else {
+            // フォールバック：画像未読み込み時は四角で描画
+            ctx.fillStyle = this.armor ? '#aaddff' : '#ffffff';
+            ctx.fillRect(this.x, this.y, this.width, this.height);
+            ctx.fillStyle = '#88ccff';
+            const cx = this.x + this.width / 2;
+            const cy = this.y + this.height / 2;
+            switch (this.facing) {
+                case 'up':    ctx.fillRect(cx - 4, this.y, 8, 6); break;
+                case 'down':  ctx.fillRect(cx - 4, this.y + this.height - 6, 8, 6); break;
+                case 'left':  ctx.fillRect(this.x, cy - 4, 6, 8); break;
+                case 'right': ctx.fillRect(this.x + this.width - 6, cy - 4, 6, 8); break;
+            }
         }
+
+        // 攻撃エフェクト描画（近接武器のみ）
         if (this.isAttacking && this.attackTimer > 0 && this.weapon.type === 'melee') {
             this.drawAttackEffect(ctx);
         }
@@ -770,8 +794,15 @@ class Monster {
         return drops;
     }
 
-    draw(ctx) {
+    draw(ctx, monsterImage) {
         if (!this.alive) return;
+
+        // スプライトサイズ（ボスは144x144、通常は96x96）
+        const spriteW = this.isBoss ? 144 : 96;
+        const spriteH = this.isBoss ? 144 : 96;
+        // 当たり判定の中心にスプライトの中心を合わせる
+        const drawX = this.x + this.width / 2 - spriteW / 2;
+        const drawY = this.y + this.height / 2 - spriteH / 2;
 
         // 突進予告エフェクト（赤い警告円）
         if (this.state === 'charge_windup') {
@@ -782,68 +813,72 @@ class Monster {
             ctx.strokeStyle = `rgba(255, 50, 50, ${pulseAlpha})`;
             ctx.lineWidth = 3;
             ctx.beginPath();
-            ctx.arc(cx, cy, this.width * 0.8 + progress * 20, 0, Math.PI * 2);
+            ctx.arc(cx, cy, spriteW * 0.5 + progress * 20, 0, Math.PI * 2);
             ctx.stroke();
-            // 内側の赤いオーラ
             ctx.fillStyle = `rgba(255, 0, 0, ${pulseAlpha * 0.3})`;
             ctx.beginPath();
-            ctx.arc(cx, cy, this.width * 0.6, 0, Math.PI * 2);
+            ctx.arc(cx, cy, spriteW * 0.4, 0, Math.PI * 2);
             ctx.fill();
         }
 
         // 突進中の残像エフェクト
-        if (this.state === 'charging') {
-            ctx.fillStyle = 'rgba(255, 100, 50, 0.2)';
-            ctx.fillRect(
-                this.x - this.chargeDir.x * 20,
-                this.y - this.chargeDir.y * 20,
-                this.width, this.height
+        if (this.state === 'charging' && monsterImage) {
+            ctx.save();
+            ctx.globalAlpha = 0.2;
+            ctx.drawImage(monsterImage,
+                drawX - this.chargeDir.x * 25,
+                drawY - this.chargeDir.y * 25,
+                spriteW, spriteH
             );
+            ctx.restore();
         }
 
         // 本体描画
-        if (this.hitFlashTimer > 0) {
-            ctx.fillStyle = '#ffffff';
-        } else if (this.state === 'charging') {
-            ctx.fillStyle = '#ff6633';
+        if (monsterImage) {
+            ctx.save();
+            // 被ダメージ時：赤tint + 点滅
+            if (this.hitFlashTimer > 0) {
+                ctx.globalAlpha = 0.6;
+                ctx.drawImage(monsterImage, drawX, drawY, spriteW, spriteH);
+                // 赤tintオーバーレイ
+                ctx.globalCompositeOperation = 'source-atop';
+                ctx.fillStyle = 'rgba(255, 80, 80, 0.5)';
+                ctx.fillRect(drawX, drawY, spriteW, spriteH);
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.globalAlpha = 1;
+            } else if (this.state === 'charging') {
+                // 突進中はオレンジがかった表現
+                ctx.drawImage(monsterImage, drawX, drawY, spriteW, spriteH);
+                ctx.globalCompositeOperation = 'source-atop';
+                ctx.fillStyle = 'rgba(255, 100, 30, 0.3)';
+                ctx.fillRect(drawX, drawY, spriteW, spriteH);
+                ctx.globalCompositeOperation = 'source-over';
+            } else {
+                ctx.drawImage(monsterImage, drawX, drawY, spriteW, spriteH);
+            }
+            ctx.restore();
         } else {
-            ctx.fillStyle = this.color;
-        }
-        ctx.fillRect(this.x, this.y, this.width, this.height);
+            // フォールバック：画像未読み込み時は四角で描画
+            if (this.hitFlashTimer > 0) {
+                ctx.fillStyle = '#ffffff';
+            } else if (this.state === 'charging') {
+                ctx.fillStyle = '#ff6633';
+            } else {
+                ctx.fillStyle = this.color;
+            }
+            ctx.fillRect(this.x, this.y, this.width, this.height);
 
-        // 目の描画（サイズに応じてスケール）
-        const eyeScale = this.width / 64;
-        const eyeSize = 10 * eyeScale;
-        const pupilSize = 4 * eyeScale;
-        const eyeY = this.y + 16 * eyeScale;
-        const eyeLeftX = this.x + 14 * eyeScale;
-        const eyeRightX = this.x + 40 * eyeScale;
-
-        ctx.fillStyle = this.isBoss ? '#ff4444' : '#ffcc00';
-        ctx.fillRect(eyeLeftX, eyeY, eyeSize, eyeSize);
-        ctx.fillRect(eyeRightX, eyeY, eyeSize, eyeSize);
-
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(eyeLeftX + 4 * eyeScale, eyeY + 3 * eyeScale, pupilSize, pupilSize + 1);
-        ctx.fillRect(eyeRightX + 4 * eyeScale, eyeY + 3 * eyeScale, pupilSize, pupilSize + 1);
-
-        // ボスの角（Giant Drake装飾）
-        if (this.isBoss) {
-            ctx.fillStyle = this.hitFlashTimer > 0 ? '#ffffff' : '#661111';
-            // 左角
-            ctx.beginPath();
-            ctx.moveTo(this.x + 10, this.y);
-            ctx.lineTo(this.x - 5, this.y - 20);
-            ctx.lineTo(this.x + 25, this.y);
-            ctx.closePath();
-            ctx.fill();
-            // 右角
-            ctx.beginPath();
-            ctx.moveTo(this.x + this.width - 25, this.y);
-            ctx.lineTo(this.x + this.width + 5, this.y - 20);
-            ctx.lineTo(this.x + this.width - 10, this.y);
-            ctx.closePath();
-            ctx.fill();
+            // 目の描画
+            const eyeScale = this.width / 64;
+            const eyeSize = 10 * eyeScale;
+            const pupilSize = 4 * eyeScale;
+            const eyeY = this.y + 16 * eyeScale;
+            ctx.fillStyle = this.isBoss ? '#ff4444' : '#ffcc00';
+            ctx.fillRect(this.x + 14 * eyeScale, eyeY, eyeSize, eyeSize);
+            ctx.fillRect(this.x + 40 * eyeScale, eyeY, eyeSize, eyeSize);
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(this.x + 18 * eyeScale, eyeY + 3 * eyeScale, pupilSize, pupilSize + 1);
+            ctx.fillRect(this.x + 44 * eyeScale, eyeY + 3 * eyeScale, pupilSize, pupilSize + 1);
         }
     }
 }
@@ -897,11 +932,38 @@ class Game {
         // 永続インベントリ
         this.inventory = new Inventory();
 
+        // スプライト画像の管理
+        this.images = {};
+        this.imagesLoaded = false;
+
         // イベントリスナー設定
         this.setupInput();
 
-        // ゲームループ開始
-        requestAnimationFrame((t) => this.loop(t));
+        // 画像をプリロードしてからゲーム開始
+        this.loadImages().then(() => {
+            this.imagesLoaded = true;
+            requestAnimationFrame((t) => this.loop(t));
+        });
+    }
+
+    /**
+     * スプライト画像のプリロード
+     * @returns {Promise}
+     */
+    loadImages() {
+        const imageFiles = {
+            player: 'assets/player.png',
+            forestDrake: 'assets/forest_drake.png',
+            giantDrake: 'assets/giant_drake.png',
+        };
+        return Promise.all(Object.entries(imageFiles).map(([key, src]) => {
+            return new Promise(resolve => {
+                const img = new Image();
+                img.onload = () => { this.images[key] = img; resolve(); };
+                img.onerror = () => { console.warn(`画像ロード失敗: ${src}`); resolve(); };
+                img.src = src;
+            });
+        }));
     }
 
     /**
@@ -1310,14 +1372,15 @@ class Game {
         // モンスター
         for (const monster of this.monsters) {
             ctx.save();
-            monster.draw(ctx);
+            const monsterImg = monster.isBoss ? this.images.giantDrake : this.images.forestDrake;
+            monster.draw(ctx, monsterImg);
             ctx.restore();
         }
 
         // プレイヤー
         if (this.player) {
             ctx.save();
-            this.player.draw(ctx);
+            this.player.draw(ctx, this.images.player);
             ctx.restore();
         }
 
