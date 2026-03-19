@@ -891,6 +891,9 @@ class Game {
         this.mouseX = 0;
         this.mouseY = 0;
 
+        // ロビーから開いたメニューかどうか
+        this._returnToLobby = false;
+
         // 永続インベントリ
         this.inventory = new Inventory();
 
@@ -1236,18 +1239,31 @@ class Game {
     draw() {
         const ctx = this.ctx;
 
+        // ロビー状態（I/Cオーバーレイ無し）
         if (this.state === 'lobby') {
             this.drawLobby(ctx);
             return;
         }
 
-        // フィールド描画
+        // インベントリ/クラフトをロビーから開いた場合は
+        // ロビー背景の上にオーバーレイを描画する
+        if ((this.state === 'inventory' || this.state === 'craft') && this._returnToLobby) {
+            this.drawLobby(ctx);
+            if (this.state === 'inventory') {
+                this.drawInventory(ctx);
+            } else {
+                this.drawCraftMenu(ctx);
+            }
+            return;
+        }
+
+        // フィールド描画（プレイヤー・モンスターが存在する場合のみ）
         this.drawBackground(ctx);
         for (const item of this.droppedItems) item.draw(ctx);
         for (const arrow of this.arrows) arrow.draw(ctx);
         for (const monster of this.monsters) monster.draw(ctx);
         if (this.player) this.player.draw(ctx);
-        this.drawUI(ctx);
+        if (this.player) this.drawUI(ctx);
 
         // オーバーレイ
         if (this.state === 'gameover') {
@@ -1569,7 +1585,7 @@ class Game {
     // インベントリ画面描画
     // ========================================
     drawInventory(ctx) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
         const panelX = 100;
@@ -1681,7 +1697,7 @@ class Game {
     // クラフト画面描画
     // ========================================
     drawCraftMenu(ctx) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
         const panelX = 100;
