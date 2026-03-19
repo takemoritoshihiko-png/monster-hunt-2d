@@ -309,18 +309,29 @@ const QUESTS = [
 ];
 
 class Weapon {
-    constructor(name, damage, range, cooldown, knockback = 0, type = 'melee', special = null) {
+    /**
+     * @param {string} name
+     * @param {number} damage - 基本ダメージ
+     * @param {number} range - 射程(px)
+     * @param {number} cooldown - クールダウン(ms)
+     * @param {number} knockback
+     * @param {string} type - 'melee'|'ranged'
+     * @param {string} style - 武器スタイル
+     * @param {string} desc - 1行説明
+     */
+    constructor(name, damage, range, cooldown, knockback, type, style, desc='') {
         this.name = name; this.damage = damage; this.range = range;
-        this.cooldown = cooldown; this.knockback = knockback; this.type = type;
-        this.special = special; // 'slow' | 'pierce' | null
+        this.cooldown = cooldown; this.knockback = knockback;
+        this.type = type; this.style = style; this.desc = desc;
     }
 }
 const WEAPONS = {
-    basicSword: new Weapon('Basic Sword', 15, 40, 350, 3, 'melee'),
-    ironSword:  new Weapon('Iron Sword',  30, 50, 400, 5, 'melee'),
-    hunterBow:  new Weapon('Hunter Bow',  20, 300, 600, 0, 'ranged'),
-    frostBlade: new Weapon('Frost Blade', 35, 50, 400, 5, 'melee', 'slow'),
-    iceBow:     new Weapon('Ice Bow',     25, 350, 550, 0, 'ranged', 'pierce'),
+    basicSword:  new Weapon('Basic Sword',  15, 45, 350, 3, 'melee', 'combo3', '3段コンボ'),
+    ironSword:   new Weapon('Iron Sword',   30, 55, 500, 5, 'melee', 'charge', 'チャージ攻撃'),
+    hunterBow:   new Weapon('Hunter Bow',   20, 300, 500, 0, 'ranged','bow',   '長押しで3連矢'),
+    frostBlade:  new Weapon('Frost Blade',  35, 50, 300, 4, 'melee', 'frost',  '2連撃・凍結'),
+    warHammer:   new Weapon('War Hammer',  120, 55,2000, 8, 'melee', 'hammer', '超重撃・部位+50%'),
+    poisonDagger:new Weapon('Poison Dagger',18, 35, 180, 1, 'melee', 'poison', '4段コンボ・毒'),
 };
 
 class Armor {
@@ -331,21 +342,24 @@ class Armor {
 const ARMORS = { drakeArmor: new Armor('Drake Armor', 20, 0.7) };
 
 const RECIPES = [
-    { id: 'ironSword', name: 'Iron Sword', description: '近距離・ダメージ30・射程50',
+    { id: 'ironSword', name: 'Iron Sword', description: 'チャージ攻撃・DMG80扇形範囲',
       resultType: 'weapon', resultId: 'ironSword',
       materials: [{ materialId: 'drakeScale', count: 3 }] },
-    { id: 'hunterBow', name: 'Hunter Bow', description: '遠距離・ダメージ20・射程300',
+    { id: 'hunterBow', name: 'Hunter Bow', description: '長押しで3連矢・扇状射撃',
       resultType: 'weapon', resultId: 'hunterBow',
       materials: [{ materialId: 'drakeFang', count: 2 }] },
+    { id: 'frostBlade', name: 'Frost Blade', description: '2連撃・3ヒットで凍結',
+      resultType: 'weapon', resultId: 'frostBlade',
+      materials: [{ materialId: 'iceFang', count: 2 }, { materialId: 'drakeScale', count: 1 }] },
+    { id: 'warHammer', name: 'War Hammer', description: '超重撃DMG120・部位破壊+50%',
+      resultType: 'weapon', resultId: 'warHammer',
+      materials: [{ materialId: 'drakeCore', count: 2 }, { materialId: 'drakeScale', count: 3 }] },
+    { id: 'poisonDagger', name: 'Poison Dagger', description: '4段コンボ・毒付与',
+      resultType: 'weapon', resultId: 'poisonDagger',
+      materials: [{ materialId: 'drakeFang', count: 3 }, { materialId: 'iceCrystal', count: 1 }] },
     { id: 'drakeArmor', name: 'Drake Armor', description: '被ダメージ x0.7（防御力+20）',
       resultType: 'armor', resultId: 'drakeArmor',
       materials: [{ materialId: 'drakeScale', count: 5 }, { materialId: 'drakeCore', count: 1 }] },
-    { id: 'frostBlade', name: 'Frost Blade', description: '近距離・DMG35・攻撃時に敵減速',
-      resultType: 'weapon', resultId: 'frostBlade',
-      materials: [{ materialId: 'iceFang', count: 2 }, { materialId: 'drakeScale', count: 1 }] },
-    { id: 'iceBow', name: 'Ice Bow', description: '遠距離・DMG25・射程350・貫通',
-      resultType: 'weapon', resultId: 'iceBow',
-      materials: [{ materialId: 'iceCrystal', count: 2 }, { materialId: 'drakeFang', count: 1 }] },
 ];
 
 // ========================================
@@ -470,11 +484,22 @@ class Player {
         this.isAttacking = false; this.attackTimer = 0;
         this.attackCooldown = 0; this.attackDuration = 200;
         this.invincibleTimer = 0; this.invincibleDuration = 500;
-        // コンボシステム
-        this.comboCount = 0;       // 現在のコンボ段数（0〜2）
-        this.comboTimer = 0;       // コンボ受付時間（ms）
-        this.comboWindow = 800;    // 次の攻撃までの受付時間（ms）
-        this.comboMultipliers = [1.0, 1.2, 1.5];
+        // 汎用コンボ
+        this.comboCount = 0;
+        this.comboTimer = 0;
+        this.comboWindow = 600;
+        // チャージ攻撃（Iron Sword / Hunter Bow）
+        this.charging = false;
+        this.chargeTime = 0;
+        this.chargeReady = false;
+        // パリィシステム
+        this.blocking = false;
+        this.parryWindow = 0;      // パリィ判定残り(ms)
+        this.parryBonus = 0;       // カウンターボーナス残り(ms)
+        this.parryCooldown = 0;    // パリィのCD
+        // Frost Blade 2連撃
+        this.frostSecondHit = 0;
+        this._frostSecondHitReady = false;
         // スロー効果（Ice Wolfの氷の息）
         this.slowTimer = 0;
         this.baseSpeed = this.speed;
@@ -555,27 +580,79 @@ class Player {
         // スロー効果
         if (this.slowTimer > 0) { this.slowTimer -= dt * 1000; this.speed = Math.floor(this.baseSpeed * 0.5); }
         else { this.speed = this.baseSpeed; }
+        // ブロック中は移動速度半減
+        if (this.blocking) this.speed = Math.floor(this.speed * 0.5);
+        // パリィ・カウンタータイマー
+        if (this.parryWindow > 0) this.parryWindow -= dt * 1000;
+        if (this.parryBonus > 0) this.parryBonus -= dt * 1000;
+        if (this.parryCooldown > 0) this.parryCooldown -= dt * 1000;
+        // チャージタイマー・完了判定
+        if (this.charging) {
+            this.chargeTime += dt * 1000;
+            const threshold = this.weapon.style === 'bow' ? 1000 : 800;
+            if (this.chargeTime >= threshold) this.chargeReady = true;
+        }
+        // Frost Blade 2連撃目タイマー
+        if (this.frostSecondHit > 0) {
+            this.frostSecondHit -= dt * 1000;
+            if (this.frostSecondHit <= 0) {
+                this.isAttacking = true; this.attackTimer = this.attackDuration;
+                this._frostSecondHitReady = true;
+            }
+        }
         this.equipBestArmor();
     }
     attack() {
-        if (this.attackCooldown>0) return null;
+        if (this.attackCooldown > 0) return null;
         this.isAttacking = true;
         this.attackTimer = this.attackDuration;
-        // コンボ進行
-        if (this.comboTimer > 0 && this.comboCount < 2) {
-            this.comboCount++;
-        } else if (this.comboTimer <= 0) {
+        const style = this.weapon.style;
+        // コンボ進行（combo3/poison用）
+        const maxCombo = style === 'poison' ? 3 : (style === 'combo3' ? 2 : 0);
+        if (style === 'combo3' || style === 'poison') {
+            if (this.comboTimer > 0 && this.comboCount < maxCombo) this.comboCount++;
+            else if (this.comboTimer <= 0) this.comboCount = 0;
+            this.comboTimer = this.comboWindow;
+        } else {
             this.comboCount = 0;
         }
-        this.comboTimer = this.comboWindow;
-        let cdMult = this.comboCount === 2 ? 1.3 : 1.0;
-        cdMult *= this.skillAtkSpdMult;
+        let cdMult = this.skillAtkSpdMult;
+        if (style === 'combo3' && this.comboCount === 2) cdMult *= 1.3;
         if (this.weapon.type === 'ranged') cdMult *= this.skillBowCdMult;
         this.attackCooldown = this.weapon.cooldown * cdMult;
-        if (this.weapon.type==='ranged') { this.comboCount=0; return null; }
+        // Frost Blade: 自動2連撃（0.2秒後に2撃目フラグ）
+        if (style === 'frost') this.frostSecondHit = 200;
+        if (this.weapon.type === 'ranged') return null;
         return this.getAttackHitbox();
     }
-    getComboMultiplier() { return this.comboMultipliers[this.comboCount] || 1.0; }
+    /** 現在のコンボ倍率を計算 */
+    getComboMultiplier() {
+        const s = this.weapon.style;
+        if (s === 'combo3') return [1.0, 1.2, 1.8][this.comboCount] || 1.0;
+        if (s === 'poison') return 1.0; // 各段固定
+        if (s === 'charge' && this.chargeReady) return 80 / Math.max(1, this.weapon.damage); // チャージ時は80dmg相当
+        return 1.0;
+    }
+    /** チャージ開始 */
+    startCharge() {
+        if (this.attackCooldown > 0) return;
+        this.charging = true; this.chargeTime = 0; this.chargeReady = false;
+    }
+    /** チャージ解放 */
+    releaseCharge() {
+        this.charging = false;
+        const wasReady = this.chargeReady;
+        this.chargeReady = false;
+        return wasReady;
+    }
+    /** ブロック開始 */
+    startBlock() {
+        if (this.parryCooldown > 0) return;
+        this.blocking = true;
+        this.parryWindow = 300; // パリィ受付0.3秒
+    }
+    /** ブロック解除 */
+    stopBlock() { this.blocking = false; }
     getAttackHitbox() {
         const range=this.weapon.range, cx=this.x+this.width/2, cy=this.y+this.height/2;
         switch(this.facing) {
@@ -585,13 +662,28 @@ class Player {
             case 'right': return {x:cx+10,y:cy-20,width:range,height:40};
         }
     }
+    /**
+     * @returns {string} 'parry' | 'block' | 'hit'
+     */
     takeDamage(amount) {
-        if (this.invincibleTimer>0) return;
+        if (this.invincibleTimer > 0) return 'hit';
+        // パリィ判定
+        if (this.blocking && this.parryWindow > 0) {
+            this.parryBonus = 1000; // 1秒間カウンターボーナス
+            this.parryCooldown = 500;
+            this.invincibleTimer = 300;
+            Sound.playHit();
+            return 'parry';
+        }
+        // ブロック: 被ダメ-60%
+        let blockMult = 1.0;
+        if (this.blocking) blockMult = 0.4;
         const armorMult = this.armor ? this.armor.damageMultiplier : 1.0;
-        const finalDmg = Math.max(1, Math.floor(amount * armorMult * this.skillDefMult));
+        const finalDmg = Math.max(1, Math.floor(amount * armorMult * this.skillDefMult * blockMult));
         this.hp = Math.max(0, this.hp - finalDmg);
         this.invincibleTimer = this.invincibleDuration;
         Sound.playDamage();
+        return this.blocking ? 'block' : 'hit';
     }
     draw(ctx, img) {
         if (this.invincibleTimer>0 && Math.floor(this.invincibleTimer/80)%2===0) return;
@@ -607,24 +699,48 @@ class Player {
             ctx.fillRect(this.x, this.y, this.width, this.height);
         }
         if (this.isAttacking && this.attackTimer>0 && this.weapon.type==='melee') this.drawAttackEffect(ctx);
+        this.drawChargeEffect(ctx);
+        // ブロック表示
+        if (this.blocking) {
+            const cx = this.x+this.width/2, cy = this.y+this.height/2;
+            ctx.strokeStyle = this.parryWindow > 0 ? 'rgba(255,220,50,0.6)' : 'rgba(150,150,255,0.4)';
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.arc(cx, cy, 22, 0, Math.PI*2); ctx.stroke();
+        }
+        // パリィカウンターボーナス表示
+        if (this.parryBonus > 0) {
+            ctx.fillStyle = `rgba(255,200,50,${Math.min(1,this.parryBonus/300)*0.3})`;
+            ctx.beginPath(); ctx.arc(this.x+this.width/2, this.y+this.height/2, 26, 0, Math.PI*2); ctx.fill();
+        }
     }
     drawAttackEffect(ctx) {
         const hb = this.getAttackHitbox(); if (!hb) return;
         const alpha = this.attackTimer / this.attackDuration;
-        // コンボ段数で色変化
-        const colors = ['rgba(255,255,100,', 'rgba(255,200,50,', 'rgba(255,120,30,'];
-        const c = colors[this.comboCount] || colors[0];
-        ctx.fillStyle = c + (alpha*0.6) + ')';
+        const s = this.weapon.style;
+        const cx = this.x+this.width/2, cy = this.y+this.height/2;
+        // スタイル別カラー
+        let col = 'rgba(255,255,100,';
+        if (s === 'frost')  col = 'rgba(100,200,255,';
+        if (s === 'hammer') col = 'rgba(255,150,50,';
+        if (s === 'poison') col = 'rgba(100,255,100,';
+        if (s === 'combo3' && this.comboCount >= 2) col = 'rgba(255,120,30,';
+        ctx.fillStyle = col + (alpha*0.6) + ')';
         ctx.fillRect(hb.x, hb.y, hb.width, hb.height);
-        // 3段目は大きいエフェクト
-        if (this.comboCount === 2) {
+        // ハンマー: 衝撃波
+        if (s === 'hammer') {
+            ctx.strokeStyle = `rgba(255,200,50,${alpha*0.5})`; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.arc(cx, cy, this.weapon.range + 15, 0, Math.PI*2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, this.weapon.range + 30, 0, Math.PI*2); ctx.stroke();
+        }
+        // combo3段目: 大きい範囲
+        if (s === 'combo3' && this.comboCount === 2) {
             ctx.fillStyle = `rgba(255,180,50,${alpha*0.3})`;
-            const cx=this.x+this.width/2, cy=this.y+this.height/2;
             ctx.beginPath(); ctx.arc(cx, cy, this.weapon.range + 10, 0, Math.PI*2); ctx.fill();
         }
-        ctx.strokeStyle = `rgba(255,255,200,${alpha})`; ctx.lineWidth = 3 + this.comboCount;
+        // スラッシュライン
+        ctx.strokeStyle = `rgba(255,255,200,${alpha})`;
+        ctx.lineWidth = 3 + (s === 'hammer' ? 3 : this.comboCount);
         ctx.beginPath();
-        const cx=this.x+this.width/2, cy=this.y+this.height/2;
         switch(this.facing) {
             case 'up': ctx.moveTo(cx-15,cy-5);ctx.lineTo(cx+15,cy-this.weapon.range-5);break;
             case 'down': ctx.moveTo(cx-15,cy+5);ctx.lineTo(cx+15,cy+this.weapon.range+5);break;
@@ -632,6 +748,20 @@ class Player {
             case 'right': ctx.moveTo(cx+5,cy-15);ctx.lineTo(cx+this.weapon.range+5,cy+15);break;
         }
         ctx.stroke();
+    }
+    drawChargeEffect(ctx) {
+        if (!this.charging) return;
+        const cx = this.x+this.width/2, cy = this.y+this.height/2;
+        const threshold = this.weapon.style === 'bow' ? 1000 : 800;
+        const progress = Math.min(1, this.chargeTime / threshold);
+        const col = this.chargeReady ? 'rgba(255,200,50,' : 'rgba(200,200,255,';
+        ctx.strokeStyle = col + (0.3+progress*0.4) + ')';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(cx, cy, 20+progress*10, 0, Math.PI*2*progress); ctx.stroke();
+        if (this.chargeReady) {
+            ctx.fillStyle = 'rgba(255,220,50,0.15)';
+            ctx.beginPath(); ctx.arc(cx, cy, 28, 0, Math.PI*2); ctx.fill();
+        }
     }
 }
 
@@ -678,12 +808,38 @@ class Monster {
         // 弱点属性: 'ice' | null
         this.weakness = (this.name === 'Forest Drake' || this.name === 'Giant Drake') ? 'ice' : null;
         this.weaknessMult = this.isBoss ? 1.3 : 1.5;
+        // 凍結システム（Frost Blade用）
+        this.frostCount = 0;      // 凍結カウンター（3でフリーズ）
+        this.frozenTimer = 0;     // 凍結中タイマー(ms)
+        this.frozenDmgMult = 1.2; // 凍結中の被ダメ倍率
+        // 毒システム（Poison Dagger用）
+        this.poisonTimer = 0;     // 毒の残り時間(ms)
+        this.poisonTickTimer = 0; // 毒ダメージ間隔タイマー
     }
     update(dt, player, game) {
         if (!this.alive) return;
         // 遅延HPバー更新
         if (this.displayHp > this.hp) {
             this.displayHp = Math.max(this.hp, this.displayHp - this.maxHp * dt * 0.8);
+        }
+        // 凍結中は動けない
+        if (this.frozenTimer > 0) {
+            this.frozenTimer -= dt * 1000;
+            if (this.hitFlashTimer > 0) this.hitFlashTimer -= dt * 1000;
+            return;
+        }
+        // 毒ダメージ処理
+        if (this.poisonTimer > 0) {
+            this.poisonTimer -= dt * 1000;
+            this.poisonTickTimer -= dt * 1000;
+            if (this.poisonTickTimer <= 0) {
+                this.poisonTickTimer = 1000;
+                this.hp = Math.max(0, this.hp - 10);
+                this.hitFlashTimer = 80;
+                if (game) game.damageNumbers.push(new DamageNumber(
+                    this.x+this.width/2, this.y-10, 10, '#44cc44', 'POISON'));
+                if (this.hp <= 0) { this.alive = false; this.state = 'dead'; return; }
+            }
         }
         // スロータイマー
         if (this.slowTimer > 0) this.slowTimer -= dt * 1000;
@@ -741,7 +897,18 @@ class Monster {
         }
         if (dist<=this.attackRange) {
             this.state='attack';
-            if (this.attackTimer<=0) { player.takeDamage(this.attackDamage); this.attackTimer=this.attackCooldown; }
+            if (this.attackTimer<=0) {
+                const result = player.takeDamage(this.attackDamage);
+                this.attackTimer=this.attackCooldown;
+                if (result === 'parry') {
+                    // パリィ成功: モンスター1秒スタン
+                    this.frozenTimer = 1000;
+                    if (game) {
+                        game.damageNumbers.push(new DamageNumber(this.x+this.width/2,this.y-30,0,'#ffcc00','PARRY!'));
+                        for (let i=0;i<6;i++) { const a=Math.random()*Math.PI*2; game.particles.push(new Particle(player.x+player.width/2,player.y+player.height/2,Math.cos(a)*80,Math.sin(a)*80-30,'#ffcc00',300,3)); }
+                    }
+                }
+            }
         } else if (dist<=this.aggroRange) {
             this.state='chase';
             this.x+=dx/dist*this.speed*speedMult*dt; this.y+=dy/dist*this.speed*speedMult*dt;
@@ -757,6 +924,9 @@ class Monster {
      */
     takeDamage(amount, kbx=0, kby=0, hitX=0, hitY=0) {
         if (!this.alive) return { partBroken: null };
+        // 凍結中は被ダメ増加
+        const frozenMult = this.frozenTimer > 0 ? this.frozenDmgMult : 1.0;
+        amount = Math.floor(amount * frozenMult);
         this.hp=Math.max(0,this.hp-amount); this.hitFlashTimer=150;
         if (this.state!=='charging'&&this.state!=='charge_windup') { this.x+=kbx; this.y+=kby; }
         // 部位ダメージ
@@ -792,6 +962,7 @@ class Monster {
         this.attackTimer=0; this.hitFlashTimer=0; this.slowTimer=0;
         this.chargeCooldownTimer=0; this.chargeTimer=0; this.chargeWindupTimer=0;
         this.phase2=false; this.speed=this.baseSpeed;
+        this.frostCount=0; this.frozenTimer=0; this.poisonTimer=0; this.poisonTickTimer=0;
     }
     generateDrops() {
         const drops=[], table=DROP_TABLES[this.dropTableId]; if (!table) return drops;
@@ -866,6 +1037,30 @@ class Monster {
         } else {
             ctx.fillStyle=this.hitFlashTimer>0?'#fff':(this.state==='charging'?'#ff6633':this.color);
             ctx.fillRect(this.x,this.y,this.width,this.height);
+        }
+        // 凍結エフェクト
+        if (this.frozenTimer > 0) {
+            ctx.save(); ctx.globalAlpha = 0.3;
+            ctx.fillStyle = '#88ddff';
+            ctx.fillRect(this.x-2, this.y-2, this.width+4, this.height+4);
+            ctx.restore();
+            ctx.strokeStyle = '#aaeeff'; ctx.lineWidth = 2;
+            ctx.strokeRect(this.x-2, this.y-2, this.width+4, this.height+4);
+        }
+        // 毒エフェクト
+        if (this.poisonTimer > 0) {
+            ctx.save();
+            ctx.globalAlpha = 0.15 + Math.sin(Date.now()*0.008)*0.1;
+            ctx.fillStyle = '#33cc33';
+            ctx.fillRect(this.x, this.y, this.width, this.height);
+            ctx.restore();
+        }
+        // 凍結カウンター表示（●）
+        if (this.frostCount > 0 && this.frozenTimer <= 0) {
+            ctx.fillStyle = '#88ddff'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+            let dots = '';
+            for (let i=0;i<3;i++) dots += i < this.frostCount ? '\u25cf' : '\u25cb';
+            ctx.fillText(dots, this.x+this.width/2, this.y+this.height+12);
         }
         // 部位破壊マーカー
         if (this.hasParts) {
@@ -1104,10 +1299,25 @@ class Game {
                 return;
             }
             if (this.state!=='playing') return;
-            if (key==='z') this.handleAttack();
+            if (key==='z') {
+                const style = this.player.weapon.style;
+                if (style === 'charge' || (style === 'bow' && this.player.weapon.type === 'ranged')) {
+                    this.player.startCharge();
+                } else {
+                    this.handleAttack();
+                }
+            }
+            if (key==='x') this.player.startBlock();
             if (key==='q') { this.player.cycleWeapon(); this.weaponSwitchMessage=`Equipped: ${this.player.weapon.name}`; this.weaponSwitchTimer=1500; }
         });
-        window.addEventListener('keyup',(e)=>{this.keys[e.key.toLowerCase()]=false;});
+        window.addEventListener('keyup',(e)=>{
+            const key = e.key.toLowerCase();
+            this.keys[key]=false;
+            if (key==='z' && this.player && this.state==='playing') {
+                if (this.player.charging) this.handleChargeRelease();
+            }
+            if (key==='x' && this.player) this.player.stopBlock();
+        });
         this.canvas.addEventListener('click',(e)=>{
             if (this.state!=='lobby') return;
             const r=this.canvas.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
@@ -1128,12 +1338,13 @@ class Game {
     }
 
     handleAttack() {
-        if (this.player.attackCooldown>0) return;
-        if (this.player.weapon.type==='ranged') {
+        if (this.player.attackCooldown > 0) return;
+        const style = this.player.weapon.style;
+        // 弓の通常射撃（タップ）
+        if (this.player.weapon.type === 'ranged') {
             this.player.attack();
             const cx=this.player.x+this.player.width/2, cy=this.player.y+this.player.height/2;
-            const isPierce = this.player.weapon.special === 'pierce';
-            this.arrows.push(new Arrow(cx,cy,this.player.facing,this.player.weapon.damage, isPierce));
+            this.arrows.push(new Arrow(cx,cy,this.player.facing,this.player.weapon.damage+this.player.bonusDamage));
             return;
         }
         const hitbox = this.player.attack(); if (!hitbox) return;
@@ -1144,10 +1355,71 @@ class Game {
                 hitAny = true;
             }
         }
-        // カメラシェイク
         if (hitAny) {
             this.shakeTimer = 60;
-            this.shakeIntensity = this.player.comboCount === 2 ? 6 : 4;
+            this.shakeIntensity = style === 'hammer' ? 8 : (this.player.comboCount >= 2 ? 6 : 4);
+        }
+    }
+
+    /** チャージ解放処理 */
+    handleChargeRelease() {
+        const wasReady = this.player.releaseCharge();
+        const style = this.player.weapon.style;
+        if (this.player.attackCooldown > 0 && !wasReady) return;
+        if (style === 'charge') {
+            // Iron Sword: チャージ完了→扇形範囲攻撃
+            if (wasReady) {
+                this.player.attackCooldown = this.player.weapon.cooldown * this.player.skillAtkSpdMult;
+                this.player.isAttacking = true; this.player.attackTimer = 300;
+                const cx=this.player.x+this.player.width/2, cy=this.player.y+this.player.height/2;
+                // 扇形範囲の全モンスターにダメージ
+                for (const m of this.monsters) {
+                    if (!m.alive) continue;
+                    const dx=(m.x+m.width/2)-cx, dy=(m.y+m.height/2)-cy;
+                    const dist=Math.sqrt(dx*dx+dy*dy);
+                    if (dist > this.player.weapon.range + 20) continue;
+                    // 角度判定（前方60度）
+                    let facing; switch(this.player.facing){case'up':facing=Math.atan2(-1,0);break;case'down':facing=Math.atan2(1,0);break;case'left':facing=Math.atan2(0,-1);break;case'right':facing=Math.atan2(0,1);break;}
+                    const angle = Math.atan2(dy,dx);
+                    let diff = Math.abs(angle-facing); if(diff>Math.PI) diff=2*Math.PI-diff;
+                    if (diff < Math.PI/6) { // 30度以内（合計60度）
+                        const {dmg,isWeak} = this.calcDamage(80, this.player.weapon, 1, m);
+                        const {partBroken} = m.takeDamage(dmg,dx/dist*8,dy/dist*8,m.x+m.width/2,m.y+m.height/2);
+                        const nc = partBroken ? '#ff4444' : (isWeak ? '#ffaa22' : '#ffcc00');
+                        const nl = partBroken ? 'BREAK!' : (isWeak ? 'WEAK!' : 'CHARGE!');
+                        this.damageNumbers.push(new DamageNumber(m.x+m.width/2,m.y-20,dmg,nc,nl));
+                        this.spawnHitParticles(m.x+m.width/2,m.y+m.height/2,10,true);
+                        if (partBroken) { Sound.playPartBreak(); const matId=partBroken==='head'?'drakeHeadScale':'drakeTail'; const item=new DroppedItem(m.x+m.width/2,m.y+m.height/2,matId,1);item.setScatter(m.x+m.width/2,m.y+m.height/2);this.droppedItems.push(item); }
+                        if (!m.alive) { Sound.playMonsterDie(); this.onMonsterDefeated(m); }
+                    }
+                }
+                Sound.playComboHit();
+                this.shakeTimer = 80; this.shakeIntensity = 6;
+            } else {
+                // 通常攻撃
+                this.handleAttack();
+            }
+        } else if (style === 'bow') {
+            // Hunter Bow: チャージ完了→3連矢
+            const cx=this.player.x+this.player.width/2, cy=this.player.y+this.player.height/2;
+            if (wasReady) {
+                this.player.attackCooldown = this.player.weapon.cooldown * this.player.skillAtkSpdMult * this.player.skillBowCdMult;
+                const dmg = 25 + this.player.bonusDamage;
+                const dir = this.player.facing;
+                // 中央 + 左右15度
+                this.arrows.push(new Arrow(cx,cy,dir,dmg));
+                const spread = 15 * Math.PI/180;
+                for (const off of [-spread, spread]) {
+                    const a = new Arrow(cx,cy,dir,dmg);
+                    const baseAngle = Math.atan2(a.vy, a.vx) + off;
+                    a.vx = Math.cos(baseAngle); a.vy = Math.sin(baseAngle);
+                    this.arrows.push(a);
+                }
+                Sound.playComboHit();
+            } else {
+                this.player.attack();
+                this.arrows.push(new Arrow(cx,cy,this.player.facing,this.player.weapon.damage+this.player.bonusDamage));
+            }
         }
     }
 
@@ -1157,9 +1429,9 @@ class Game {
     calcDamage(baseDmg, weapon, comboMult, monster) {
         let dmg = (baseDmg + this.player.bonusDamage) * comboMult;
         if (weapon.type === 'melee') dmg *= this.player.skillMeleeMult;
-        // 弱点判定
+        // 弱点判定（氷属性武器 → 氷弱点モンスター）
         let isWeak = false;
-        if (monster.weakness === 'ice' && (weapon.special === 'slow' || weapon.special === 'pierce')) {
+        if (monster.weakness === 'ice' && weapon.style === 'frost') {
             dmg *= monster.weaknessMult;
             isWeak = true;
         }
@@ -1172,11 +1444,27 @@ class Game {
         const dist=Math.sqrt(dx*dx+dy*dy)||1;
         const kb=this.player.weapon.knockback;
         const comboMult = this.player.getComboMultiplier();
-        const { dmg, isWeak } = this.calcDamage(this.player.weapon.damage, this.player.weapon, comboMult, monster);
+        let { dmg, isWeak } = this.calcDamage(this.player.weapon.damage, this.player.weapon, comboMult, monster);
+        // パリィカウンターボーナス
+        if (this.player.parryBonus > 0) dmg = Math.floor(dmg * 1.3);
+        // ハンマー部位破壊ボーナス
+        const style = this.player.weapon.style;
+        const partDmgMult = style === 'hammer' ? 1.5 : 1.0;
         const hx = monster.x+monster.width/2, hy = monster.y+monster.height/2;
-        const { partBroken } = monster.takeDamage(dmg, (dx/dist)*kb*comboMult, (dy/dist)*kb*comboMult, hx, hy);
-        // Frost Bladeのスロー効果
-        if (this.player.weapon.special === 'slow') monster.slowTimer = 1000;
+        const { partBroken } = monster.takeDamage(Math.floor(dmg * partDmgMult), (dx/dist)*kb*comboMult, (dy/dist)*kb*comboMult, hx, hy);
+        // Frost Blade: 凍結カウンター
+        if (style === 'frost' && monster.alive && monster.frozenTimer <= 0) {
+            monster.frostCount++;
+            if (monster.frostCount >= 3) {
+                monster.frozenTimer = 2000; monster.frostCount = 0;
+                // 氷エフェクト
+                for (let i=0;i<8;i++) { const a=Math.random()*Math.PI*2; this.particles.push(new Particle(hx,hy,Math.cos(a)*80,Math.sin(a)*80,'#aaeeff',400,3)); }
+            }
+        }
+        // Poison Dagger: 3段目で毒付与
+        if (style === 'poison' && this.player.comboCount === 2 && monster.alive) {
+            monster.poisonTimer = 3000; monster.poisonTickTimer = 1000;
+        }
         // ダメージ数値表示
         let numColor = '#fff', numLabel = '';
         if (partBroken) { numColor = '#ff4444'; numLabel = 'BREAK!'; Sound.playPartBreak();
@@ -1314,6 +1602,18 @@ class Game {
         if (this.state!=='playing') return;
 
         this.player.update(dt, this.keys, this.canvas.width, this.canvas.height, TREES);
+        // Frost Blade 2連撃目のヒット判定
+        if (this.player._frostSecondHitReady) {
+            this.player._frostSecondHitReady = false;
+            const hb = this.player.getAttackHitbox();
+            if (hb) {
+                for (const m of this.monsters) {
+                    if (m.alive && this.checkCollision(hb, m)) {
+                        this.applyMeleeDamageToMonster(m);
+                    }
+                }
+            }
+        }
         for (const m of this.monsters) if (m.alive) m.update(dt, this.player, this);
 
         for (const arrow of this.arrows) {
@@ -1540,10 +1840,29 @@ class Game {
             ctx.fillText(`Lv${this.player.level}  MAX`, pBarX, expBarY + 22);
         }
 
-        // コンボ表示
-        if (this.player.comboTimer > 0 && this.player.weapon.type === 'melee') {
-            ctx.fillStyle = '#ffcc44'; ctx.font = 'bold 14px monospace'; ctx.textAlign = 'left';
-            ctx.fillText(`COMBO x${this.player.comboCount+1}`, pBarX, pBarY+60);
+        // コンボ/チャージ表示
+        const wStyle = this.player.weapon.style;
+        if (this.player.comboTimer > 0 && (wStyle==='combo3'||wStyle==='poison')) {
+            const max = wStyle==='poison'?4:3;
+            let dots = '';
+            for (let i=0;i<max;i++) dots += i<=this.player.comboCount ? '\u25cf' : '\u25cb';
+            ctx.fillStyle = wStyle==='poison'?'#44cc44':'#ffcc44';
+            ctx.font = 'bold 14px monospace'; ctx.textAlign = 'left';
+            ctx.fillText(`COMBO ${dots}`, pBarX, pBarY+60);
+        }
+        if (this.player.charging) {
+            const threshold = wStyle==='bow'?1000:800;
+            const p = Math.min(1,this.player.chargeTime/threshold);
+            ctx.fillStyle='#444'; ctx.fillRect(pBarX,pBarY+55,pBarW*0.5,8);
+            ctx.fillStyle=this.player.chargeReady?'#ffcc00':'#8888cc';
+            ctx.fillRect(pBarX,pBarY+55,pBarW*0.5*p,8);
+            ctx.strokeStyle='#888';ctx.lineWidth=1;ctx.strokeRect(pBarX,pBarY+55,pBarW*0.5,8);
+            ctx.fillStyle='#fff';ctx.font='10px monospace';ctx.textAlign='left';
+            ctx.fillText(this.player.chargeReady?'CHARGE READY!':'Charging...',pBarX+pBarW*0.5+5,pBarY+63);
+        }
+        if (this.player.blocking) {
+            ctx.fillStyle='#8888ff';ctx.font='bold 12px monospace';ctx.textAlign='left';
+            ctx.fillText('BLOCKING',pBarX,pBarY+75);
         }
 
         // === モンスターHPバー（遅延ダメージ表現） ===
@@ -1589,7 +1908,7 @@ class Game {
         ctx.fillStyle='#fff';ctx.font='12px monospace';ctx.textAlign='left';
         ctx.fillText(`Weapon: ${this.player.weapon.name}`,eqX+8,eqY+15);
         ctx.fillStyle='#aaa';ctx.font='10px monospace';
-        ctx.fillText(`[${this.player.weapon.type==='ranged'?'Ranged':'Melee'}] DMG:${this.player.weapon.damage}  Q:Switch`,eqX+8,eqY+28);
+        ctx.fillText(`${this.player.weapon.desc}  Q:Switch`,eqX+8,eqY+28);
         if (this.player.armor) {
             ctx.fillStyle='#aaddff';ctx.font='12px monospace';
             ctx.fillText(`Armor: ${this.player.armor.name} (x${this.player.armor.damageMultiplier})`,eqX+8,eqY+45);
@@ -1600,7 +1919,7 @@ class Game {
             ctx.fillText(this.weaponSwitchMessage,400,400);
         }
         ctx.fillStyle='rgba(255,255,255,0.5)';ctx.font='12px monospace';ctx.textAlign='center';
-        ctx.fillText('WASD:Move  Z:Attack  Q:Switch  I:Inventory  C:Craft',400,590);
+        ctx.fillText('WASD:Move  Z:Attack  X:Block/Parry  Q:Switch  I:Inv  C:Craft',400,590);
         // ミニマップ描画
         this.drawMinimap(ctx);
     }
