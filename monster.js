@@ -21,14 +21,14 @@ export class Monster {
         this.isBoss=config.isBoss||false;
         this.chargeWindupTimer=0; this.chargeWindupDuration=500;
         this.chargeDuration=600; this.chargeTimer=0;
-        this.chargeSpeed=350; this.chargeDamage=20;
+        this.chargeSpeed=350; this.chargeDamage=28;
         this.chargeCooldown=5000; this.chargeCooldownTimer=0;
         this.chargeDir={x:0,y:0}; this.chargeHitDealt=false;
         // スロー効果（Frost Blade等で付与）
         this.slowTimer = 0;
         // Ice Wolf: 氷の息
         this.isIceWolf = config.isIceWolf || false;
-        this.iceBreathCooldown = 3000; // 3秒ごと
+        this.iceBreathCooldown = 2000; // 2秒ごと
         this.iceBreathTimer = this.iceBreathCooldown;
         // Giant Drake 第2形態
         this.phase2 = false;
