@@ -2229,7 +2229,7 @@ class Game {
                 const dcx=detailX+(W-detailX-15)/2;
                 let dy=contentY+30;
                 // 大アイコン
-                const ic2=iconColors={ironSword:'#cc8844',hunterBow:'#88cc44',frostBlade:'#66bbee',warHammer:'#aa6633',poisonDagger:'#66aa66',drakeArmor:'#6688cc'};
+                const ic2={ironSword:'#cc8844',hunterBow:'#88cc44',frostBlade:'#66bbee',warHammer:'#aa6633',poisonDagger:'#66aa66',drakeArmor:'#6688cc'};
                 ctx.fillStyle=ic2[selR.id]||'#888';
                 roundRect(ctx,dcx-30,dy-20,60,60,6);ctx.fill();
                 ctx.fillStyle='#111';ctx.font='bold 24px monospace';ctx.textAlign='center';
