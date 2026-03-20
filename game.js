@@ -37,6 +37,9 @@ class Game {
         // クラフト画面タブ
         this.craftTab = 0; // 0=CRAFT, 1=UPGRADE
         this.upgradeCursor = 0;
+        // インベントリUI
+        this.invTab = 0;         // 0=武器, 1=防具, 2=素材, 3=アイテム
+        this.invCursor = 0;      // 選択カーソル
         // 必殺技表示
         this.slowMoTimer = 0;
         this.ultimateName = '';
@@ -439,7 +442,7 @@ class Game {
                     if (!this.isQuestLocked(q)) this.startQuest(q);
                 }
                 if (key==='t') { this.timeAttackMode=!this.timeAttackMode; }
-                if (key==='i') {this.state='inventory';this._returnToLobby=true;return;}
+                if (key==='i') {this.state='inventory';this._returnToLobby=true;this.invTab=0;this.invCursor=0;return;}
                 if (key==='c') {this.state='craft';this.craftCursor=0;this.craftTab=0;this._returnToLobby=true;return;}
                 return;
             }
@@ -447,12 +450,20 @@ class Game {
             if (this.state==='gameover') { if (key==='r') this._returnToLobbyWithSave(); return; }
             if (key==='i') {
                 if (this.state==='inventory') {this.state=this._returnToLobby?'lobby':'playing';this._returnToLobby=false;}
-                else if (this.state==='playing') {this.state='inventory';this._returnToLobby=false;}
+                else if (this.state==='playing') {this.state='inventory';this._returnToLobby=false;this.invTab=0;this.invCursor=0;}
                 return;
             }
             if (key==='c') {
                 if (this.state==='craft') {this.state=this._returnToLobby?'lobby':'playing';this._returnToLobby=false;}
                 else if (this.state==='playing') {this.state='craft';this.craftCursor=0;this._returnToLobby=false;}
+                return;
+            }
+            // インベントリ内操作
+            if (this.state==='inventory') {
+                if (key==='arrowleft'||key==='a') { this.invTab=Math.max(0,this.invTab-1); this.invCursor=0; }
+                else if (key==='arrowright'||key==='d') { this.invTab=Math.min(3,this.invTab+1); this.invCursor=0; }
+                else if (key==='arrowup'||key==='w') this.invCursor=Math.max(0,this.invCursor-1);
+                else if (key==='arrowdown'||key==='s') this.invCursor++;
                 return;
             }
             if (this.state==='craft') {
@@ -1809,74 +1820,255 @@ class Game {
 
     drawInventory(ctx) {
         ctx.save(); ctx.globalAlpha = 1;
-        // 全画面オーバーレイ
-        ctx.fillStyle = '#0d0d1a';
-        ctx.fillRect(0,0,this.W,this.H);
-        // タイトル
-        ctx.fillStyle = '#4488cc'; ctx.font = 'bold 28px monospace'; ctx.textAlign = 'center';
-        ctx.fillText('INVENTORY', 400, 40);
-        ctx.strokeStyle = '#333355'; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(30, 52); ctx.lineTo(770, 52); ctx.stroke();
+        const W = this.W, H = this.H;
 
-        // === 左列: 素材 ===
-        let y = 75;
-        ctx.fillStyle = '#88ccff'; ctx.font = 'bold 15px monospace'; ctx.textAlign = 'left';
-        ctx.fillText('Materials', 30, y);
-        y += 22; ctx.font = '13px monospace';
-        let has = false;
-        for (const [id, mat] of Object.entries(MATERIALS)) {
-            const c = this.inventory.getMaterialCount(id);
-            if (c > 0) {
-                has = true;
-                ctx.fillStyle = mat.color;
-                ctx.beginPath(); ctx.arc(45, y - 4, 5, 0, Math.PI * 2); ctx.fill();
-                ctx.fillStyle = '#ddd';
-                ctx.fillText(`${mat.name}`, 58, y);
-                ctx.fillStyle = '#ffcc44'; ctx.textAlign = 'right';
-                ctx.fillText(`x${c}`, 370, y);
+        // === 背景: 濃いグレー格子 ===
+        ctx.fillStyle = '#1a1a22';
+        ctx.fillRect(0, 0, W, H);
+        // 格子パターン
+        ctx.strokeStyle = 'rgba(255,255,255,0.03)'; ctx.lineWidth = 1;
+        for (let gx = 0; gx < W; gx += 20) { ctx.beginPath(); ctx.moveTo(gx,0); ctx.lineTo(gx,H); ctx.stroke(); }
+        for (let gy = 0; gy < H; gy += 20) { ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(W,gy); ctx.stroke(); }
+
+        // === フレーム: 金ボーダー ===
+        ctx.strokeStyle = '#c8a800'; ctx.lineWidth = 3;
+        ctx.strokeRect(8, 8, W-16, H-16);
+        // リベット
+        const rivetR = 5;
+        for (const [rx,ry] of [[15,15],[W-15,15],[15,H-15],[W-15,H-15]]) {
+            ctx.fillStyle = '#aa9000'; ctx.beginPath(); ctx.arc(rx,ry,rivetR,0,Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#ddc840'; ctx.beginPath(); ctx.arc(rx-1,ry-1,rivetR*0.5,0,Math.PI*2); ctx.fill();
+        }
+
+        // === タイトル帯 ===
+        const titleGrad = ctx.createLinearGradient(0, 18, 0, 52);
+        titleGrad.addColorStop(0, '#3a3a44'); titleGrad.addColorStop(0.5, '#4a4a55'); titleGrad.addColorStop(1, '#2a2a33');
+        ctx.fillStyle = titleGrad;
+        ctx.fillRect(15, 18, W-30, 36);
+        ctx.fillStyle = '#c8a800'; ctx.font = 'bold 22px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('INVENTORY', W/2, 43);
+
+        // === タブ ===
+        const tabNames = ['Weapons', 'Armor', 'Materials', 'Items'];
+        const tabW = Math.min(140, (W-60)/4);
+        const tabStartX = 20;
+        const tabY = 62;
+        for (let t = 0; t < 4; t++) {
+            const tx = tabStartX + t * (tabW + 6);
+            const sel = t === this.invTab;
+            ctx.fillStyle = sel ? '#2a2a38' : '#1a1a22';
+            roundRect(ctx, tx, tabY, tabW, 26, 4); ctx.fill();
+            ctx.strokeStyle = sel ? '#c8a800' : '#444'; ctx.lineWidth = sel ? 2 : 1;
+            roundRect(ctx, tx, tabY, tabW, 26, 4); ctx.stroke();
+            ctx.fillStyle = sel ? '#c8a800' : '#666'; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
+            ctx.fillText(tabNames[t], tx + tabW/2, tabY + 18);
+            // 選択中アンダーライン
+            if (sel) {
+                ctx.fillStyle = '#c8a800';
+                ctx.fillRect(tx + 10, tabY + 24, tabW - 20, 2);
+            }
+        }
+
+        const contentY = 100;
+        const contentH = H - contentY - 40;
+        const detailX = W * 0.62; // 右パネル開始
+
+        // === 左側: リスト/グリッド ===
+        if (this.invTab === 0) {
+            // 武器タブ
+            const weapons = this.inventory.weapons;
+            this.invCursor = Math.min(this.invCursor, weapons.length - 1);
+            let wy = contentY;
+            for (let i = 0; i < weapons.length; i++) {
+                const w = weapons[i];
+                const sel = i === this.invCursor;
+                const eq = this.player && w === this.player.weapon;
+                // 行背景
+                ctx.fillStyle = sel ? 'rgba(200,168,0,0.12)' : (i%2===0 ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0)');
+                ctx.fillRect(20, wy, detailX - 30, 32);
+                if (sel) { ctx.strokeStyle = '#c8a800'; ctx.lineWidth = 1; ctx.strokeRect(20, wy, detailX - 30, 32); }
+                // 装備マーク
+                if (eq) { ctx.fillStyle = '#c8a800'; ctx.font = 'bold 14px monospace'; ctx.textAlign = 'left'; ctx.fillText('\u25b6', 26, wy + 22); }
+                // 武器アイコン（色分け）
+                const iconColors = { combo3:'#aaaaaa', charge:'#cc8844', bow:'#88cc44', frost:'#66bbee', hammer:'#aa6633', poison:'#66aa66' };
+                ctx.fillStyle = iconColors[w.style] || '#888';
+                ctx.fillRect(48, wy + 6, 18, 18);
+                ctx.fillStyle = '#222'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+                ctx.fillText(w.type==='ranged'?'B':'S', 57, wy + 19);
+                // 名前
+                ctx.fillStyle = eq ? '#c8a800' : (sel ? '#fff' : '#bbb');
+                ctx.font = 'bold 13px monospace'; ctx.textAlign = 'left';
+                ctx.fillText(w.getDisplayName(), 74, wy + 15);
+                // 強化★
+                let stars = '';
+                for (let s = 0; s < 3; s++) stars += s < w.upgradeLevel ? '\u2605' : '\u2606';
+                ctx.fillStyle = '#c8a800'; ctx.font = '10px monospace';
+                ctx.fillText(stars, 74, wy + 28);
+                // DMG
+                ctx.fillStyle = '#888'; ctx.textAlign = 'right';
+                ctx.fillText(`DMG:${w.damage}`, detailX - 15, wy + 20);
                 ctx.textAlign = 'left';
-                y += 24;
+                wy += 34;
             }
-        }
-        if (!has) { ctx.fillStyle = '#555'; ctx.fillText('No materials', 58, y); y += 24; }
-
-        // === 右列上: 武器 ===
-        let wy = 75;
-        ctx.fillStyle = '#ffcc44'; ctx.font = 'bold 15px monospace';
-        ctx.fillText('Weapons', 420, wy);
-        wy += 22; ctx.font = '13px monospace';
-        for (const w of this.inventory.weapons) {
-            const eq = this.player && w === this.player.weapon;
-            if (eq) { ctx.fillStyle = '#44ff44'; ctx.fillText('E', 425, wy); }
-            ctx.fillStyle = eq ? '#fff' : '#aaa';
-            ctx.fillText(w.name, 445, wy);
-            ctx.fillStyle = '#777'; ctx.textAlign = 'right';
-            ctx.fillText(`DMG:${w.damage} ${w.desc}`, 770, wy);
-            ctx.textAlign = 'left';
-            wy += 24;
-        }
-
-        // === 右列下: 防具 ===
-        wy += 12;
-        ctx.fillStyle = '#aaddff'; ctx.font = 'bold 15px monospace';
-        ctx.fillText('Armor', 420, wy);
-        wy += 22; ctx.font = '13px monospace';
-        if (this.inventory.armors.length === 0) {
-            ctx.fillStyle = '#555'; ctx.fillText('No armor', 445, wy);
+            // 右パネル: 選択武器詳細
+            const selW = weapons[this.invCursor];
+            if (selW) this._drawInvDetail(ctx, detailX, contentY, W - detailX - 15, contentH, 'weapon', selW);
+        } else if (this.invTab === 1) {
+            // 防具タブ
+            const armors = this.inventory.armors;
+            this.invCursor = Math.min(this.invCursor, Math.max(0, armors.length - 1));
+            if (armors.length === 0) {
+                ctx.fillStyle = '#555'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
+                ctx.fillText('No armor crafted yet', W/3, contentY + 40);
+            } else {
+                let ay = contentY;
+                for (let i = 0; i < armors.length; i++) {
+                    const a = armors[i];
+                    const sel = i === this.invCursor;
+                    const eq = this.player && a === this.player.armor;
+                    ctx.fillStyle = sel ? 'rgba(200,168,0,0.12)' : 'rgba(0,0,0,0)';
+                    ctx.fillRect(20, ay, detailX - 30, 32);
+                    if (sel) { ctx.strokeStyle = '#c8a800'; ctx.lineWidth = 1; ctx.strokeRect(20, ay, detailX - 30, 32); }
+                    if (eq) { ctx.fillStyle = '#c8a800'; ctx.font = 'bold 14px monospace'; ctx.textAlign = 'left'; ctx.fillText('\u25b6', 26, ay + 22); }
+                    ctx.fillStyle = '#6688cc'; ctx.fillRect(48, ay + 6, 18, 18);
+                    ctx.fillStyle = eq ? '#c8a800' : (sel ? '#fff' : '#bbb');
+                    ctx.font = 'bold 13px monospace'; ctx.textAlign = 'left';
+                    ctx.fillText(a.getDisplayName(), 74, ay + 20);
+                    ctx.fillStyle = '#888'; ctx.textAlign = 'right';
+                    ctx.fillText(`DEF x${a.damageMultiplier}`, detailX - 15, ay + 20);
+                    ctx.textAlign = 'left';
+                    ay += 34;
+                }
+            }
+        } else if (this.invTab === 2) {
+            // 素材タブ: 5列グリッド
+            const matEntries = Object.entries(MATERIALS);
+            const cols = 5, cellW = 70, cellH = 70, pad = 8;
+            const gridX = 25;
+            this.invCursor = Math.min(this.invCursor, matEntries.length - 1);
+            for (let i = 0; i < matEntries.length; i++) {
+                const [id, mat] = matEntries[i];
+                const c = this.inventory.getMaterialCount(id);
+                const col = i % cols, row = Math.floor(i / cols);
+                const cx = gridX + col * (cellW + pad);
+                const cy = contentY + row * (cellH + pad);
+                const sel = i === this.invCursor;
+                // セル背景
+                ctx.fillStyle = '#222233';
+                roundRect(ctx, cx, cy, cellW, cellH, 4); ctx.fill();
+                ctx.strokeStyle = sel ? '#c8a800' : '#333344'; ctx.lineWidth = sel ? 2 : 1;
+                roundRect(ctx, cx, cy, cellW, cellH, 4); ctx.stroke();
+                // 選択時光エフェクト
+                if (sel) {
+                    ctx.fillStyle = 'rgba(200,168,0,0.08)';
+                    roundRect(ctx, cx, cy, cellW, cellH, 4); ctx.fill();
+                }
+                // アイコン描画
+                const icx = cx + cellW/2, icy = cy + cellH/2 - 5;
+                this._drawMatIcon(ctx, id, icx, icy, 14);
+                // 個数バッジ
+                if (c > 0) {
+                    ctx.fillStyle = '#222'; roundRect(ctx, cx+cellW-22, cy+cellH-18, 20, 15, 3); ctx.fill();
+                    ctx.fillStyle = '#fff'; ctx.font = 'bold 10px monospace'; ctx.textAlign = 'center';
+                    ctx.fillText(c, cx+cellW-12, cy+cellH-7);
+                }
+            }
+            // 右パネル: 選択素材詳細
+            if (matEntries[this.invCursor]) {
+                const [selId, selMat] = matEntries[this.invCursor];
+                this._drawInvDetail(ctx, detailX, contentY, W - detailX - 15, contentH, 'material', selMat);
+            }
         } else {
-            for (const a of this.inventory.armors) {
-                const eq = this.player && a === this.player.armor;
-                if (eq) { ctx.fillStyle = '#44ff44'; ctx.fillText('E', 425, wy); }
-                ctx.fillStyle = eq ? '#fff' : '#aaa';
-                ctx.fillText(`${a.name}  DEF+${a.defense} (x${a.damageMultiplier})`, 445, wy);
-                wy += 24;
-            }
+            // アイテムタブ（将来用）
+            ctx.fillStyle = '#555'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
+            ctx.fillText('No items yet', W/3, contentY + 40);
         }
 
-        // 操作ガイド（最下部固定）
-        ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
-        ctx.fillText('Press I to close', 400, 580);
+        // 操作ガイド
+        ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '12px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('A/D:Tab  W/S:Select  I:Close', W/2, H - 18);
         ctx.restore();
+    }
+
+    /** 素材アイコン描画ヘルパー */
+    _drawMatIcon(ctx, id, cx, cy, r) {
+        const colors = { drakeScale:'#44cc88', drakeFang:'#cccc44', drakeCore:'#cc44cc',
+            iceFang:'#66ccee', iceCrystal:'#aaeeff', drakeHeadScale:'#55aa77',
+            drakeTail:'#aa7744', elderScale:'#cc88ff' };
+        ctx.fillStyle = colors[id] || '#888';
+        if (id.includes('Scale') || id === 'elderScale') {
+            // 六角形
+            ctx.beginPath();
+            for (let i=0;i<6;i++) { const a=Math.PI/6+i*Math.PI/3; ctx.lineTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r); }
+            ctx.closePath(); ctx.fill();
+        } else if (id.includes('Fang')) {
+            // 三角形（牙）
+            ctx.beginPath(); ctx.moveTo(cx,cy-r); ctx.lineTo(cx-r*0.7,cy+r); ctx.lineTo(cx+r*0.7,cy+r); ctx.closePath(); ctx.fill();
+        } else if (id === 'drakeCore') {
+            // ひし形
+            ctx.beginPath(); ctx.moveTo(cx,cy-r); ctx.lineTo(cx+r,cy); ctx.lineTo(cx,cy+r); ctx.lineTo(cx-r,cy); ctx.closePath(); ctx.fill();
+        } else if (id === 'iceCrystal') {
+            // 六角星
+            ctx.beginPath();
+            for (let i=0;i<6;i++) { const a=i*Math.PI/3-Math.PI/2; const r2=i%2===0?r:r*0.5;
+                ctx.lineTo(cx+Math.cos(a)*r2, cy+Math.sin(a)*r2); }
+            ctx.closePath(); ctx.fill();
+        } else if (id === 'drakeTail') {
+            // 曲線
+            ctx.beginPath(); ctx.moveTo(cx-r,cy+r*0.5); ctx.quadraticCurveTo(cx,cy-r,cx+r,cy+r*0.5); ctx.lineWidth=3; ctx.strokeStyle=colors[id]; ctx.stroke();
+        } else {
+            ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+        }
+    }
+
+    /** 右パネル詳細描画ヘルパー */
+    _drawInvDetail(ctx, x, y, w, h, type, item) {
+        // パネル背景
+        ctx.fillStyle = 'rgba(30,30,40,0.9)';
+        roundRect(ctx, x, y, w, h, 8); ctx.fill();
+        ctx.strokeStyle = '#444'; ctx.lineWidth = 1;
+        roundRect(ctx, x, y, w, h, 8); ctx.stroke();
+
+        const cx = x + w/2;
+        let dy = y + 30;
+
+        if (type === 'weapon') {
+            // 大きいアイコン
+            const iconColors = { combo3:'#aaaaaa', charge:'#cc8844', bow:'#88cc44', frost:'#66bbee', hammer:'#aa6633', poison:'#66aa66' };
+            ctx.fillStyle = iconColors[item.style] || '#888';
+            ctx.fillRect(cx-20, dy-15, 40, 40);
+            ctx.fillStyle = '#111'; ctx.font = 'bold 18px monospace'; ctx.textAlign = 'center';
+            ctx.fillText(item.type==='ranged'?'B':'S', cx, dy+12);
+            dy += 40;
+            // 名前
+            ctx.fillStyle = '#c8a800'; ctx.font = 'bold 16px monospace';
+            ctx.fillText(item.getDisplayName(), cx, dy);
+            dy += 22;
+            ctx.fillStyle = '#aaa'; ctx.font = '12px monospace';
+            ctx.fillText(item.desc, cx, dy);
+            dy += 25;
+            // ステータス
+            ctx.textAlign = 'left'; ctx.fillStyle = '#bbb'; ctx.font = '12px monospace';
+            ctx.fillText(`Damage: ${item.damage}`, x+15, dy); dy+=18;
+            ctx.fillText(`Range: ${item.range}`, x+15, dy); dy+=18;
+            ctx.fillText(`Cooldown: ${item.cooldown}ms`, x+15, dy); dy+=18;
+            ctx.fillText(`Type: ${item.type}`, x+15, dy); dy+=18;
+            ctx.fillText(`Style: ${item.style}`, x+15, dy); dy+=25;
+            // 必殺技名
+            const ultNames = { combo3:'乱舞斬り', charge:'大地割り', bow:'矢の雨', frost:'吹雪', hammer:'天地崩壊', poison:'毒霧' };
+            ctx.fillStyle = '#c8a800'; ctx.font = 'bold 12px monospace';
+            ctx.fillText(`Ultimate: ${ultNames[item.style]||'-'}`, x+15, dy);
+        } else if (type === 'material') {
+            // 大きいアイコン
+            this._drawMatIcon(ctx, item.id, cx, dy+5, 25);
+            dy += 45;
+            ctx.fillStyle = item.color; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
+            ctx.fillText(item.name, cx, dy); dy += 20;
+            ctx.fillStyle = '#999'; ctx.font = '12px monospace';
+            ctx.fillText(item.description, cx, dy); dy += 25;
+            ctx.fillStyle = '#bbb';
+            ctx.fillText(`Owned: ${this.inventory.getMaterialCount(item.id)}`, cx, dy);
+        }
     }
 
     drawCraftMenu(ctx) {
