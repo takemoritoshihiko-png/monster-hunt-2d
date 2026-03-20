@@ -37,6 +37,10 @@ class Game {
         // クラフト画面タブ
         this.craftTab = 0; // 0=CRAFT, 1=UPGRADE
         this.upgradeCursor = 0;
+        // クラフトアニメーション
+        this.craftAnimTimer = 0;     // アニメ進行(ms)
+        this.craftAnimName = '';     // クラフトした武器名
+        this.craftAnimActive = false;
         // インベントリUI
         this.invTab = 0;         // 0=武器, 1=防具, 2=素材, 3=アイテム
         this.invCursor = 0;      // 選択カーソル
@@ -560,7 +564,14 @@ class Game {
     executeCraft() {
         const r=RECIPES[this.craftCursor]; if (!r) return;
         if (this.inventory.alreadyOwns(r)) {this.craftMessage='Already owned!';this.craftMessageTimer=1500;return;}
-        if (this.inventory.craft(r)) {this.craftMessage=`Crafted: ${r.name}!`;this.craftMessageTimer=2000;}
+        if (this.inventory.craft(r)) {
+            this.craftMessage=`Crafted: ${r.name}!`;this.craftMessageTimer=2000;
+            this.craftAnimActive=true; this.craftAnimTimer=1500; this.craftAnimName=r.name;
+            // 金パーティクル
+            for (let i=0;i<20;i++) { const a=Math.random()*Math.PI*2,sp=80+Math.random()*120;
+                this.particles.push(new Particle(this.W/2,this.H/2,Math.cos(a)*sp,Math.sin(a)*sp-40,'#ffcc00',600+Math.random()*400,3)); }
+            Sound.playLevelUp();
+        }
         else {this.craftMessage='Not enough materials!';this.craftMessageTimer=1500;}
     }
 
@@ -903,6 +914,7 @@ class Game {
         if (this.saveIndicatorTimer>0) this.saveIndicatorTimer-=dt*1000;
         if (this.slowMoTimer>0) { this.slowMoTimer-=dt*1000; dt *= 0.3; } // スローモーション
         if (this.ultimateDisplayTimer>0) this.ultimateDisplayTimer-=dt*1000;
+        if (this.craftAnimTimer>0) { this.craftAnimTimer-=dt*1000; if (this.craftAnimTimer<=0) this.craftAnimActive=false; }
 
         // ダメージ数値更新
         for (const dn of this.damageNumbers) dn.update(dt);
@@ -2073,172 +2085,237 @@ class Game {
 
     drawCraftMenu(ctx) {
         ctx.save(); ctx.globalAlpha = 1;
-        // 全画面オーバーレイ
-        ctx.fillStyle = '#0d0d1a';
-        ctx.fillRect(0,0,this.W,this.H);
-        // タイトル
-        // タブ表示
-        const tabNames = ['CRAFT', 'UPGRADE'];
-        for (let t = 0; t < 2; t++) {
-            const tx = 200 + t * 200, tw = 160;
-            ctx.fillStyle = this.craftTab === t ? '#cc8844' : '#444';
-            roundRect(ctx, tx, 10, tw, 30, 5); ctx.fill();
-            ctx.fillStyle = this.craftTab === t ? '#fff' : '#888';
-            ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
-            ctx.fillText(tabNames[t], tx + tw / 2, 30);
+        const W = this.W, H = this.H;
+
+        // === 背景: 金属格子 ===
+        ctx.fillStyle = '#1a1a22'; ctx.fillRect(0, 0, W, H);
+        ctx.strokeStyle = 'rgba(255,255,255,0.03)'; ctx.lineWidth = 1;
+        for (let gx=0;gx<W;gx+=20){ctx.beginPath();ctx.moveTo(gx,0);ctx.lineTo(gx,H);ctx.stroke();}
+        for (let gy=0;gy<H;gy+=20){ctx.beginPath();ctx.moveTo(0,gy);ctx.lineTo(W,gy);ctx.stroke();}
+        // フレーム+リベット
+        ctx.strokeStyle='#c8a800'; ctx.lineWidth=3; ctx.strokeRect(8,8,W-16,H-16);
+        for (const [rx,ry] of [[15,15],[W-15,15],[15,H-15],[W-15,H-15]]) {
+            ctx.fillStyle='#aa9000';ctx.beginPath();ctx.arc(rx,ry,5,0,Math.PI*2);ctx.fill();
+            ctx.fillStyle='#ddc840';ctx.beginPath();ctx.arc(rx-1,ry-1,2.5,0,Math.PI*2);ctx.fill();
         }
-        ctx.strokeStyle = '#443322'; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(30, 48); ctx.lineTo(770, 48); ctx.stroke();
+        // タイトル帯
+        const tg=ctx.createLinearGradient(0,18,0,52);
+        tg.addColorStop(0,'#3a3a44');tg.addColorStop(0.5,'#4a4a55');tg.addColorStop(1,'#2a2a33');
+        ctx.fillStyle=tg; ctx.fillRect(15,18,W-30,36);
+
+        // === タブ ===
+        const tabNames=['CRAFT','UPGRADE']; const tabW=130;
+        for (let t=0;t<2;t++) {
+            const tx=W/2-tabW-5+t*(tabW+10), sel=t===this.craftTab;
+            ctx.fillStyle=sel?'#2a2a38':'#1a1a22';
+            roundRect(ctx,tx,22,tabW,28,4);ctx.fill();
+            ctx.strokeStyle=sel?'#c8a800':'#444';ctx.lineWidth=sel?2:1;
+            roundRect(ctx,tx,22,tabW,28,4);ctx.stroke();
+            ctx.fillStyle=sel?'#c8a800':'#666';ctx.font='bold 14px monospace';ctx.textAlign='center';
+            ctx.fillText(tabNames[t],tx+tabW/2,41);
+            if(sel){ctx.fillStyle='#c8a800';ctx.fillRect(tx+15,48,tabW-30,2);}
+        }
+
+        const contentY=65, detailX=W*0.62, listW=detailX-25;
 
         if (this.craftTab === 1) {
             // === UPGRADEタブ ===
-            const items = [...this.inventory.weapons.filter(w=>w.name!=='Basic Sword'), ...this.inventory.armors];
-            let uy = 65;
-            if (items.length === 0) {
-                ctx.fillStyle = '#666'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
-                ctx.fillText('No upgradeable items', 400, 200);
+            const items=[...this.inventory.weapons.filter(w=>w.name!=='Basic Sword'),...this.inventory.armors];
+            this.upgradeCursor=Math.min(this.upgradeCursor,Math.max(0,items.length-1));
+            if (items.length===0) {
+                ctx.fillStyle='#555';ctx.font='14px monospace';ctx.textAlign='center';
+                ctx.fillText('No upgradeable items',W/3,contentY+60);
             } else {
-                for (let i = 0; i < items.length; i++) {
-                    const item = items[i];
-                    const sel = i === this.upgradeCursor;
-                    const isWeapon = item instanceof Weapon;
-                    const canUp = isWeapon ? this.inventory.canUpgrade(item) : this.inventory.canUpgradeArmor(item);
-                    const lvl = item.upgradeLevel || 0;
-                    const maxed = lvl >= 3;
-                    // カード
-                    ctx.fillStyle = sel ? 'rgba(100,150,200,0.15)' : '#111122';
-                    roundRect(ctx, 30, uy, 740, 55, 6); ctx.fill();
-                    if (sel) { ctx.strokeStyle = '#4488cc'; ctx.lineWidth = 2; roundRect(ctx, 30, uy, 740, 55, 6); ctx.stroke(); }
-                    // 名前
-                    ctx.fillStyle = sel ? '#fff' : '#aaa'; ctx.font = 'bold 14px monospace'; ctx.textAlign = 'left';
-                    const dname = item.getDisplayName ? item.getDisplayName() : `${item.name}+${lvl}`;
-                    ctx.fillText(dname, 50, uy + 22);
-                    // レベルドット
-                    ctx.font = '12px monospace'; ctx.fillStyle = '#888';
-                    let dots = ''; for (let d = 0; d < 3; d++) dots += d < lvl ? '\u2605' : '\u2606';
-                    ctx.fillText(dots, 250, uy + 22);
-                    // ステータス
-                    if (isWeapon) { ctx.fillStyle='#aaa'; ctx.fillText(`DMG:${item.damage}`, 330, uy+22); }
-                    else { ctx.fillText(`x${item.damageMultiplier}`, 330, uy+22); }
-                    // コスト表示
-                    if (!maxed) {
-                        const id = this.inventory.getWeaponId ? this.inventory.getWeaponId(item) : 'drakeArmor';
-                        const costDef = UPGRADE_COSTS[id || 'drakeArmor'];
-                        if (costDef) {
-                            const c = costDef.costs[lvl];
-                            ctx.fillStyle = '#888'; ctx.font = '11px monospace';
-                            ctx.fillText(`Cost: ${MATERIALS[costDef.mat].name} x${c.m}${c.c>0?' + Core x'+c.c:''}`, 50, uy+42);
-                        }
-                    } else {
-                        ctx.fillStyle = '#ffcc00'; ctx.font = '11px monospace';
-                        ctx.fillText('MAX LEVEL', 50, uy + 42);
+                let uy=contentY;
+                for (let i=0;i<items.length;i++) {
+                    const item=items[i],sel=i===this.upgradeCursor;
+                    const isW=item instanceof Weapon;
+                    const canUp=isW?this.inventory.canUpgrade(item):this.inventory.canUpgradeArmor(item);
+                    const lvl=item.upgradeLevel||0, maxed=lvl>=3;
+                    ctx.fillStyle=sel?'rgba(200,168,0,0.1)':'#111122';
+                    roundRect(ctx,20,uy,listW,50,6);ctx.fill();
+                    if(sel){ctx.strokeStyle='#c8a800';ctx.lineWidth=2;roundRect(ctx,20,uy,listW,50,6);ctx.stroke();}
+                    ctx.fillStyle=sel?'#fff':'#aaa';ctx.font='bold 13px monospace';ctx.textAlign='left';
+                    ctx.fillText(item.getDisplayName?item.getDisplayName():item.name,42,uy+20);
+                    ctx.fillStyle='#c8a800';ctx.font='10px monospace';
+                    let stars='';for(let d=0;d<3;d++)stars+=d<lvl?'\u2605':'\u2606';
+                    ctx.fillText(stars,42,uy+35);
+                    if(isW){ctx.fillStyle='#888';ctx.fillText(`DMG:${item.damage}`,200,uy+35);}
+                    if(!maxed){
+                        const id=this.inventory.getWeaponId?this.inventory.getWeaponId(item):'drakeArmor';
+                        const costDef=UPGRADE_COSTS[id||'drakeArmor'];
+                        if(costDef){const c=costDef.costs[lvl];ctx.fillStyle='#777';ctx.fillText(`${MATERIALS[costDef.mat].name} x${c.m}${c.c>0?' + Core x'+c.c:''}`,300,uy+20);}
+                    } else {ctx.fillStyle='#c8a800';ctx.fillText('MAX',300,uy+20);}
+                    if(sel&&!maxed){
+                        const bx=listW-80,by2=uy+10,bw=80,bh=24;
+                        ctx.fillStyle=canUp?'#886600':'#333';roundRect(ctx,bx,by2,bw,bh,4);ctx.fill();
+                        if(canUp){ctx.strokeStyle='#c8a800';ctx.lineWidth=1;roundRect(ctx,bx,by2,bw,bh,4);ctx.stroke();}
+                        ctx.fillStyle=canUp?'#fff':'#666';ctx.font='bold 11px monospace';ctx.textAlign='center';
+                        ctx.fillText('UPGRADE',bx+bw/2,by2+16);ctx.textAlign='left';
                     }
-                    // ボタン
-                    if (sel && !maxed) {
-                        const bx = 640, by = uy + 8, bw = 110, bh = 26;
-                        ctx.fillStyle = canUp ? '#44aa44' : '#333';
-                        roundRect(ctx, bx, by, bw, bh, 4); ctx.fill();
-                        ctx.fillStyle = canUp ? '#fff' : '#777';
-                        ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
-                        ctx.fillText('UPGRADE [Z]', bx + bw/2, by + 17);
-                        ctx.textAlign = 'left';
-                    }
-                    uy += 62;
+                    uy+=56;
+                }
+                // 右パネル（選択アイテム詳細）
+                if(items[this.upgradeCursor]){
+                    const it=items[this.upgradeCursor];
+                    const isW=it instanceof Weapon;
+                    if(isW) this._drawInvDetail(ctx,detailX,contentY,W-detailX-15,H-contentY-40,'weapon',it);
                 }
             }
         } else {
-        // === CRAFTタブ（2列グリッド） ===
-        const cardW = 370, cardH = 120, gap = 10;
-        const colX = [15, 415];
-        const startY = 55;
-
-        for (let i = 0; i < RECIPES.length; i++) {
-            const r = RECIPES[i];
-            const col = i % 2;
-            const row = Math.floor(i / 2);
-            const cx = colX[col];
-            const cy = startY + row * (cardH + gap);
-            const cc = this.inventory.canCraft(r);
-            const own = this.inventory.alreadyOwns(r);
-            const sel = i === this.craftCursor;
-
-            // カード背景
-            if (sel) {
-                ctx.fillStyle = 'rgba(204,136,68,0.12)';
-                roundRect(ctx, cx, cy, cardW, cardH, 8); ctx.fill();
-                ctx.strokeStyle = '#cc8844'; ctx.lineWidth = 2;
-                roundRect(ctx, cx, cy, cardW, cardH, 8); ctx.stroke();
-            } else {
-                ctx.fillStyle = '#111122';
-                roundRect(ctx, cx, cy, cardW, cardH, 8); ctx.fill();
-                ctx.strokeStyle = '#333344'; ctx.lineWidth = 1;
-                roundRect(ctx, cx, cy, cardW, cardH, 8); ctx.stroke();
+            // === CRAFTタブ（左リスト+右詳細） ===
+            const cardH=65, gap=6;
+            this.craftCursor=Math.min(this.craftCursor,RECIPES.length-1);
+            let cy=contentY;
+            for (let i=0;i<RECIPES.length;i++) {
+                const r=RECIPES[i];
+                const cc=this.inventory.canCraft(r);
+                const own=this.inventory.alreadyOwns(r);
+                const sel=i===this.craftCursor;
+                // カード背景
+                ctx.fillStyle=sel?'rgba(200,168,0,0.1)':'#111122';
+                roundRect(ctx,20,cy,listW,cardH,6);ctx.fill();
+                ctx.strokeStyle=sel?'#c8a800':'#2a2a33';ctx.lineWidth=sel?2:1;
+                roundRect(ctx,20,cy,listW,cardH,6);ctx.stroke();
+                // 武器アイコン
+                const iconColors={ironSword:'#cc8844',hunterBow:'#88cc44',frostBlade:'#66bbee',warHammer:'#aa6633',poisonDagger:'#66aa66',drakeArmor:'#6688cc'};
+                ctx.fillStyle=iconColors[r.id]||'#888';
+                roundRect(ctx,28,cy+8,42,cardH-16,4);ctx.fill();
+                ctx.fillStyle='#111';ctx.font='bold 16px monospace';ctx.textAlign='center';
+                const iconLetter=r.resultType==='armor'?'A':(WEAPONS[r.resultId]?.type==='ranged'?'B':'S');
+                ctx.fillText(iconLetter,49,cy+cardH/2+6);
+                // 武器名
+                ctx.fillStyle=own?'#555':(sel?'#c8a800':'#bbb');
+                ctx.font='bold 13px monospace';ctx.textAlign='left';
+                ctx.fillText(r.name,78,cy+18);
+                if(own){ctx.fillStyle='#44aa44';ctx.font='10px monospace';ctx.fillText('[OWNED]',78+ctx.measureText(r.name).width+8,cy+18);}
+                // 説明
+                ctx.fillStyle='#777';ctx.font='10px monospace';
+                ctx.fillText(r.description,78,cy+33);
+                // 素材
+                let mx=78;const my=cy+50;
+                for (const req of r.materials) {
+                    const mat=MATERIALS[req.materialId];
+                    const ow=this.inventory.getMaterialCount(req.materialId);
+                    const en=ow>=req.count;
+                    this._drawMatIcon(ctx,req.materialId,mx+6,my-4,5);
+                    mx+=14;
+                    ctx.fillStyle=en?'#fff':'#cc4444';ctx.font='10px monospace';ctx.textAlign='left';
+                    const tx=`x${req.count} `;ctx.fillText(tx,mx,my);mx+=ctx.measureText(tx).width+4;
+                }
+                // CRAFTボタン
+                if(sel&&!own){
+                    const bx=listW-65,by=cy+cardH/2-12,bw=65,bh=24;
+                    if(cc){
+                        ctx.fillStyle='#886600';roundRect(ctx,bx,by,bw,bh,4);ctx.fill();
+                        ctx.strokeStyle='#c8a800';ctx.lineWidth=1;roundRect(ctx,bx,by,bw,bh,4);ctx.stroke();
+                        ctx.fillStyle='#fff';
+                    } else {
+                        ctx.fillStyle='#222';roundRect(ctx,bx,by,bw,bh,4);ctx.fill();
+                        ctx.fillStyle='#555';
+                    }
+                    ctx.font='bold 11px monospace';ctx.textAlign='center';
+                    ctx.fillText('CRAFT',bx+bw/2,by+16);ctx.textAlign='left';
+                }
+                cy+=cardH+gap;
             }
-
-            // カーソル
-            if (sel) {
-                ctx.fillStyle = '#cc8844'; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'left';
-                ctx.fillText('>', cx + 8, cy + 24);
-            }
-
-            // 武器名
-            ctx.fillStyle = own ? '#666' : (cc ? '#fff' : '#888');
-            ctx.font = 'bold 15px monospace'; ctx.textAlign = 'left';
-            ctx.fillText(r.name, cx + 25, cy + 24);
-
-            // [OWNED]
-            if (own) {
-                ctx.fillStyle = '#44cc44'; ctx.font = '11px monospace';
-                ctx.fillText('[OWNED]', cx + 25 + ctx.measureText(r.name).width + 8, cy + 24);
-            }
-
-            // 説明
-            ctx.fillStyle = '#999'; ctx.font = '11px monospace';
-            ctx.fillText(r.description, cx + 25, cy + 44);
-
-            // 必要素材
-            ctx.fillStyle = '#888'; ctx.font = '11px monospace';
-            let mx = cx + 25;
-            const my = cy + 68;
-            for (const req of r.materials) {
-                const mat = MATERIALS[req.materialId];
-                const ow = this.inventory.getMaterialCount(req.materialId);
-                const en = ow >= req.count;
-                ctx.fillStyle = mat.color;
-                ctx.beginPath(); ctx.arc(mx + 4, my - 3, 4, 0, Math.PI * 2); ctx.fill();
-                mx += 12;
-                ctx.fillStyle = en ? '#44cc44' : '#cc4444';
-                const tx = `${mat.name} ${ow}/${req.count}  `;
-                ctx.fillText(tx, mx, my);
-                mx += ctx.measureText(tx).width;
-            }
-
-            // クラフトボタン
-            if (sel && !own) {
-                const bx = cx + cardW - 110, by = cy + cardH - 35;
-                const bw = 95, bh = 26;
-                ctx.fillStyle = cc ? '#44aa44' : '#333';
-                roundRect(ctx, bx, by, bw, bh, 4); ctx.fill();
-                ctx.fillStyle = cc ? '#fff' : '#777';
-                ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
-                ctx.fillText('CRAFT [Z]', bx + bw / 2, by + 17);
-                ctx.textAlign = 'left';
+            // 右パネル: 選択レシピ詳細
+            const selR=RECIPES[this.craftCursor];
+            if(selR) {
+                ctx.fillStyle='rgba(30,30,40,0.9)';
+                roundRect(ctx,detailX,contentY,W-detailX-15,H-contentY-40,8);ctx.fill();
+                ctx.strokeStyle='#444';ctx.lineWidth=1;
+                roundRect(ctx,detailX,contentY,W-detailX-15,H-contentY-40,8);ctx.stroke();
+                const dcx=detailX+(W-detailX-15)/2;
+                let dy=contentY+30;
+                // 大アイコン
+                const ic2=iconColors={ironSword:'#cc8844',hunterBow:'#88cc44',frostBlade:'#66bbee',warHammer:'#aa6633',poisonDagger:'#66aa66',drakeArmor:'#6688cc'};
+                ctx.fillStyle=ic2[selR.id]||'#888';
+                roundRect(ctx,dcx-30,dy-20,60,60,6);ctx.fill();
+                ctx.fillStyle='#111';ctx.font='bold 24px monospace';ctx.textAlign='center';
+                ctx.fillText(selR.resultType==='armor'?'A':'S',dcx,dy+18);
+                dy+=55;
+                // 名前
+                ctx.fillStyle='#c8a800';ctx.font='bold 16px monospace';
+                ctx.fillText(selR.name,dcx,dy);dy+=22;
+                ctx.fillStyle='#aaa';ctx.font='italic 11px monospace';
+                ctx.fillText(selR.description,dcx,dy);dy+=25;
+                // ステータスバー
+                const w2=WEAPONS[selR.resultId];
+                if(w2){
+                    const barW=W-detailX-55, barX=detailX+20;
+                    const stats=[
+                        {name:'ATK',val:w2.baseDamage,max:150},
+                        {name:'RNG',val:w2.range,max:400},
+                        {name:'SPD',val:Math.max(0,600-w2.cooldown),max:500},
+                    ];
+                    for (const st of stats) {
+                        ctx.fillStyle='#888';ctx.font='10px monospace';ctx.textAlign='left';
+                        ctx.fillText(st.name,barX,dy);
+                        ctx.fillStyle='#222';roundRect(ctx,barX+35,dy-8,barW-35,10,3);ctx.fill();
+                        ctx.save();roundRect(ctx,barX+35,dy-8,barW-35,10,3);ctx.clip();
+                        ctx.fillStyle='#c8a800';ctx.fillRect(barX+35,dy-8,(barW-35)*Math.min(1,st.val/st.max),10);
+                        ctx.restore();
+                        dy+=18;
+                    }
+                    dy+=10;
+                    // 必殺技
+                    const ultNames={combo3:'乱舞斬り',charge:'大地割り',bow:'矢の雨',frost:'吹雪',hammer:'天地崩壊',poison:'毒霧'};
+                    ctx.fillStyle='#c8a800';ctx.font='bold 11px monospace';ctx.textAlign='left';
+                    ctx.fillText(`Ultimate: ${ultNames[w2.style]||'-'}`,barX,dy);
+                }
+                // 必要素材リスト
+                dy+=25;
+                ctx.fillStyle='#aaa';ctx.font='bold 11px monospace';ctx.textAlign='left';
+                ctx.fillText('Required Materials:',detailX+20,dy);dy+=18;
+                for (const req of selR.materials) {
+                    const mat=MATERIALS[req.materialId];
+                    const ow=this.inventory.getMaterialCount(req.materialId);
+                    const en=ow>=req.count;
+                    this._drawMatIcon(ctx,req.materialId,detailX+32,dy-3,7);
+                    ctx.fillStyle=en?'#44cc44':'#cc4444';ctx.font='11px monospace';
+                    ctx.fillText(`${mat.name} ${ow}/${req.count}`,detailX+45,dy);
+                    dy+=18;
+                }
             }
         }
 
-        } // craftTab === 0 の閉じ括弧
-
-        // クラフトメッセージ
-        if (this.craftMessageTimer > 0) {
-            const alpha = Math.min(1, this.craftMessageTimer / 300);
-            ctx.fillStyle = `rgba(255,255,100,${alpha})`;
-            ctx.font = 'bold 18px monospace'; ctx.textAlign = 'center';
-            ctx.fillText(this.craftMessage, 400, 545);
+        // クラフトアニメーション
+        if (this.craftAnimActive && this.craftAnimTimer > 0) {
+            const t=1500-this.craftAnimTimer;
+            ctx.save();
+            if (t < 300) {
+                // 素材が中央に集まる
+                ctx.globalAlpha=t/300;
+                ctx.fillStyle='rgba(200,168,0,0.3)';
+                ctx.beginPath();ctx.arc(W/2,H/2,80-t*0.2,0,Math.PI*2);ctx.fill();
+            } else if (t < 500) {
+                // 光の爆発
+                const p=(t-300)/200;
+                ctx.globalAlpha=1-p;
+                ctx.fillStyle='rgba(255,220,100,0.6)';
+                ctx.beginPath();ctx.arc(W/2,H/2,p*150,0,Math.PI*2);ctx.fill();
+            } else if (t < 1500) {
+                // 武器名表示
+                const a=Math.min(1,(t-500)/200);
+                ctx.globalAlpha=a*(1-Math.max(0,(t-1200)/300));
+                ctx.fillStyle='#c8a800';ctx.font='bold 28px monospace';ctx.textAlign='center';
+                ctx.fillText(`${this.craftAnimName} CRAFTED!`,W/2,H/2);
+            }
+            ctx.restore();
         }
 
-        // 操作ガイド（最下部固定）
-        ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
-        ctx.fillText('W/S:Select  Z:Execute  E:Tab  C:Close', 400, 580);
+        // メッセージ
+        if (this.craftMessageTimer>0 && !this.craftAnimActive) {
+            const alpha=Math.min(1,this.craftMessageTimer/300);
+            ctx.fillStyle=`rgba(255,255,100,${alpha})`;
+            ctx.font='bold 16px monospace';ctx.textAlign='center';
+            ctx.fillText(this.craftMessage,W/2,H-45);
+        }
+
+        // 操作ガイド
+        ctx.fillStyle='rgba(255,255,255,0.35)';ctx.font='12px monospace';ctx.textAlign='center';
+        ctx.fillText('W/S:Select  Z:Execute  E:Tab  C:Close',W/2,H-18);
         ctx.restore();
     }
 }
