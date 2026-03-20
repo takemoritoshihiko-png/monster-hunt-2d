@@ -129,6 +129,8 @@ class Game {
 
         // カメラシェイク
         this.shakeTimer = 0; this.shakeIntensity = 0;
+        // ヒットストップ
+        this.hitStopFrames = 0;
 
         // 結果画面演出用
         this.resultAnimTimer = 0; // 経過時間（秒）
@@ -620,7 +622,17 @@ class Game {
                 if (this.keys['a']||this.keys['arrowleft']) ddx=-1;
                 if (this.keys['d']||this.keys['arrowright']) ddx=1;
                 if (this.player.dodge(ddx, ddy)) {
-                    this.damageNumbers.push(new DamageNumber(this.player.x+this.player.width/2, this.player.y-20, 0, '#44ddff', 'EVADE!'));
+                    // ジャスト回避判定（モンスターが攻撃溜め中かチェック）
+                    let isJust = false;
+                    for (const m of this.monsters) {
+                        if (m.alive && m.atkPhase === 'windup' && m.telegraphTimer < 200) isJust = true;
+                    }
+                    if (isJust) {
+                        this.damageNumbers.push(new DamageNumber(this.player.x+this.player.width/2, this.player.y-30, 0, '#ffcc00', 'JUST EVADE!!'));
+                        this.player.justEvadeBonus = 2000;
+                    } else {
+                        this.damageNumbers.push(new DamageNumber(this.player.x+this.player.width/2, this.player.y-20, 0, '#44ddff', 'EVADE!'));
+                    }
                 }
             }
             if (key==='r') this.tryUltimate();
@@ -1014,6 +1026,8 @@ class Game {
     calcDamage(baseDmg, weapon, comboMult, monster) {
         let dmg = (baseDmg + this.player.bonusDamage) * comboMult;
         if (weapon.type === 'melee') dmg *= this.player.skillMeleeMult;
+        // ジャスト回避ボーナス
+        if (this.player.justEvadeBonus > 0) dmg *= 1.5;
         // 武練スキル
         if (this.player.hasSkill('training')) dmg *= 1.1;
         // 居合スキル: ダッシュ直後
@@ -1083,7 +1097,17 @@ class Game {
         // ヒットパーティクル
         const isFinish = this.player.comboCount === 2;
         this.spawnHitParticles(hx, hy, isFinish ? 12 : 7, isFinish);
-        if (isFinish) Sound.playComboHit(); else Sound.playHit();
+        // ヒットストップ
+        this.hitStopFrames = (style === 'hammer') ? 5 : 3;
+        // 画面振動
+        this.shakeTimer = 100; this.shakeIntensity = style === 'hammer' ? 8 : 3;
+        // 大ダメージ時は画面端赤フラッシュ
+        if (dmg >= 100) { this.shakeIntensity = 8; this.shakeTimer = 200; }
+        // 武器別ヒット音
+        if (style === 'hammer') Sound.playComboHit();
+        else if (style === 'poison') { Sound._beep(600+this.player.comboCount*100, 0.04, 'square', 0.1); }
+        else if (isFinish) Sound.playComboHit();
+        else Sound.playHit();
         if (!monster.alive) { Sound.playMonsterDie(); this.onMonsterDefeated(monster); }
     }
 
@@ -1234,6 +1258,8 @@ class Game {
     loop(timestamp) {
         const dt=this.lastTime?(timestamp-this.lastTime)/1000:0;
         this.lastTime=timestamp;
+        // ヒットストップ: フレームスキップ
+        if (this.hitStopFrames > 0) { this.hitStopFrames--; this.draw(); requestAnimationFrame((t)=>this.loop(t)); return; }
         this.update(Math.min(dt,0.1));
         this.draw();
         requestAnimationFrame((t)=>this.loop(t));
@@ -1407,6 +1433,14 @@ class Game {
         }
         this.droppedItems=this.droppedItems.filter(i=>!i.isFullyDone());
 
+        // 立ち止まりペナルティ（1.5秒以上）
+        if (this.player.stationaryTimer > 1500) {
+            this.player.hp = Math.max(0, this.player.hp - 20);
+            this.player.stationaryTimer = 0;
+            this.damageNumbers.push(new DamageNumber(this.player.x+this.player.width/2, this.player.y-20, 20, '#ff4444', 'GROUND BREAK!'));
+            this.shakeTimer = 100; this.shakeIntensity = 5;
+            Sound.playDamage();
+        }
         if (this.player.hp<=0) {
             if (this.rogueActive) { this.rogueGameOver(); return; }
             this.questSuccess=false; Sound.playQuestFailed();

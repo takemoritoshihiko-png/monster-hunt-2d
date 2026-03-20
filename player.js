@@ -42,9 +42,14 @@ export class Player {
         // スタミナ（回避消費）
         this.staminaRegenDelay = 0;  // 消費後の回復遅延
         // 必殺技ゲージ
-        this.ultimateGauge = 0;      // 0〜100
+        this.ultimateGauge = 0;
         this.ultimateActive = false;
         this.ultimateTimer = 0;
+        // 立ち止まりペナルティ
+        this.stationaryTimer = 0;    // 同じ場所にいる時間(ms)
+        this.lastPosX = x; this.lastPosY = y;
+        // ジャスト回避ボーナス
+        this.justEvadeBonus = 0;     // +50%ダメージボーナス残り(ms)
         // レベル・EXPシステム
         this.level = 1;
         this.exp = 0;
@@ -169,6 +174,13 @@ export class Player {
         if (this.ultimateTimer <= 0) this.ultimateActive = false;
         // 魔力充填: ゲージ自動回復
         if (this.hasSkill('mg_charge')) this.ultimateGauge = Math.min(100, this.ultimateGauge + 2 * dt);
+        // ジャスト回避ボーナス
+        if (this.justEvadeBonus > 0) this.justEvadeBonus -= dt * 1000;
+        // 立ち止まりペナルティ
+        const moved = Math.abs(this.x - this.lastPosX) + Math.abs(this.y - this.lastPosY);
+        if (moved < 2) { this.stationaryTimer += dt * 1000; }
+        else { this.stationaryTimer = 0; }
+        this.lastPosX = this.x; this.lastPosY = this.y;
         this.equipBestArmor();
     }
     /** スキルツリーのスキルを持っているか */
@@ -191,6 +203,8 @@ export class Player {
         }
         const len = Math.sqrt(dx*dx+dy*dy) || 1;
         this.dashDirX = dx/len; this.dashDirY = dy/len;
+        // 残像記録
+        this.dashTrail = [{x:this.x,y:this.y},{x:this.x,y:this.y},{x:this.x,y:this.y}];
         return true;
     }
     /** 必殺技ゲージ加算 */
@@ -316,11 +330,24 @@ export class Player {
             ctx.fillStyle = `rgba(255,200,50,${Math.min(1,this.parryBonus/300)*0.3})`;
             ctx.beginPath(); ctx.arc(this.x+this.width/2, this.y+this.height/2, 26, 0, Math.PI*2); ctx.fill();
         }
-        // ダッシュ残像
-        if (this.dashTimer > 0) {
-            ctx.save(); ctx.globalAlpha = 0.3;
-            ctx.fillStyle = '#aaddff';
-            ctx.fillRect(this.x - this.dashDirX*15, this.y - this.dashDirY*15, this.width, this.height);
+        // ダッシュ残像（3つ）
+        if (this.dashTimer > 0 && this.dashTrail) {
+            for (let i = 0; i < this.dashTrail.length; i++) {
+                ctx.save(); ctx.globalAlpha = 0.15 - i*0.04;
+                ctx.fillStyle = '#88ccff';
+                ctx.fillRect(this.dashTrail[i].x, this.dashTrail[i].y, this.width, this.height);
+                ctx.restore();
+            }
+            // 残像位置を更新
+            this.dashTrail.unshift({x:this.x-this.dashDirX*20,y:this.y-this.dashDirY*20});
+            if (this.dashTrail.length > 3) this.dashTrail.pop();
+        }
+        // 立ち止まりペナルティ表示
+        if (this.stationaryTimer > 800) {
+            const progress = Math.min(1, (this.stationaryTimer-800) / 700);
+            ctx.save(); ctx.globalAlpha = 0.3 * progress;
+            ctx.strokeStyle = '#ff2222'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(this.x+this.width/2, this.y+this.height/2, 20+progress*20, 0, Math.PI*2*progress); ctx.stroke();
             ctx.restore();
         }
     }

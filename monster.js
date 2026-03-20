@@ -73,6 +73,10 @@ export class Monster {
         // 攻撃予備動作
         this.telegraphTimer = 0;
         this.telegraphing = false;
+        this.atkPhase = null;    // 'windup'|'strike'|'recovery'|null
+        this.atkType = 'normal'; // 'normal'|'charge'|'aoe'
+        this._strikeDealt = false;
+        this.hasSkill_tk_shield = false;
     }
     _initWeakZones() {
         const n = this.name;
@@ -117,6 +121,11 @@ export class Monster {
             return { zone, mult: 0.5, label: 'HARD' };
         }
         return { zone, mult: 1.0, label: '' };
+    }
+    _chooseAttackType(dist) {
+        if (this.isBoss && Math.random() < 0.3) return 'aoe';
+        if (this.isIceWolf && Math.random() < 0.4) return 'charge';
+        return 'normal';
     }
     update(dt, player, game) {
         if (!this.alive) return;
@@ -276,32 +285,59 @@ export class Monster {
             this.state='charge_windup'; this.chargeWindupTimer=this.chargeWindupDuration;
             Sound.playChargeWarning(); this.chargeCooldownTimer=this.chargeCooldown; return;
         }
-        // 攻撃（予備動作付き）
+        // 攻撃3フェーズシステム
         if (dist<=this.attackRange) {
-            this.state='attack';
             if (this.attackTimer<=0) {
-                // 予備動作フェーズ
-                if (!this.telegraphing) {
+                // フェーズ1: 溜め
+                if (!this.telegraphing && this.atkPhase !== 'strike' && this.atkPhase !== 'recovery') {
                     this.telegraphing = true;
-                    this.telegraphTimer = 800; // 0.8秒予告
+                    this.atkPhase = 'windup';
+                    this.telegraphTimer = this.isIceWolf ? 500 : (this.isBoss ? 1500 : 600);
+                    this.atkType = this._chooseAttackType(dist);
                     return;
                 }
-                this.telegraphTimer -= dt * 1000;
-                if (this.telegraphTimer > 0) return; // まだ予告中
-                this.telegraphing = false;
-                // 予備動作を見逃した場合ダメージ1.5倍
-                const telegraphDmg = player.dashTimer > 0 ? this.attackDamage : Math.floor(this.attackDamage * 1.5);
-                const result = player.takeDamage(telegraphDmg);
-                this.attackTimer=this.attackCooldown;
-                if (result === 'hit' || result === 'block') {
-                    if (game) game.subQuestState.damageTaken++;
+                if (this.atkPhase === 'windup') {
+                    this.state = 'attack';
+                    this.telegraphTimer -= dt * 1000;
+                    if (this.telegraphTimer > 0) return;
+                    // フェーズ2: 攻撃（0.2秒）
+                    this.atkPhase = 'strike';
+                    this.telegraphTimer = 200;
+                    return;
                 }
-                if (result === 'parry') {
-                    this.frozenTimer = 1000;
-                    if (game) { game.subQuestState.parryCount++;
-                        game.damageNumbers.push(new DamageNumber(this.x+this.width/2,this.y-30,0,'#ffcc00','PARRY!'));
-                        for (let i=0;i<6;i++) { const a=Math.random()*Math.PI*2; game.particles.push(new Particle(player.x+player.width/2,player.y+player.height/2,Math.cos(a)*80,Math.sin(a)*80-30,'#ffcc00',300,3)); }
+                if (this.atkPhase === 'strike') {
+                    this.state = 'attack';
+                    this.telegraphTimer -= dt * 1000;
+                    if (this.telegraphTimer > 0 && this.telegraphTimer > 100) return; // ヒット判定は途中1回
+                    if (!this._strikeDealt) {
+                        this._strikeDealt = true;
+                        const result = player.takeDamage(this.attackDamage);
+                        if (result === 'hit' || result === 'block') { if (game) game.subQuestState.damageTaken++; }
+                        if (result === 'parry') {
+                            this.frozenTimer = this.hasSkill_tk_shield ? 2500 : 1000;
+                            if (game) { game.subQuestState.parryCount++;
+                                game.damageNumbers.push(new DamageNumber(this.x+this.width/2,this.y-30,0,'#ffcc00','PARRY!'));
+                                for (let i=0;i<6;i++){const a=Math.random()*Math.PI*2;game.particles.push(new Particle(player.x+player.width/2,player.y+player.height/2,Math.cos(a)*80,Math.sin(a)*80-30,'#ffcc00',300,3));}
+                            }
+                        }
                     }
+                    if (this.telegraphTimer <= 0) {
+                        // フェーズ3: 硬直（0.5秒）
+                        this.atkPhase = 'recovery';
+                        this.telegraphTimer = 500;
+                        this.telegraphing = false;
+                    }
+                    return;
+                }
+                if (this.atkPhase === 'recovery') {
+                    this.state = 'recovery';
+                    this.telegraphTimer -= dt * 1000;
+                    if (this.telegraphTimer <= 0) {
+                        this.atkPhase = null;
+                        this._strikeDealt = false;
+                        this.attackTimer = this.attackCooldown;
+                    }
+                    return;
                 }
             }
         } else if (dist<=this.aggroRange) {
@@ -454,20 +490,36 @@ export class Monster {
             ctx.fillStyle=this.hitFlashTimer>0?'#fff':(this.state==='charging'?'#ff6633':this.color);
             ctx.fillRect(this.x,this.y,this.width,this.height);
         }
-        // 予備動作エフェクト
-        if (this.telegraphing) {
+        // 予備動作エフェクト（フェーズ1: 溜め）
+        if (this.atkPhase === 'windup') {
             const pulse = Math.sin(Date.now() * 0.015) > 0;
             if (pulse) {
-                ctx.save(); ctx.globalAlpha = 0.25;
+                ctx.save(); ctx.globalAlpha = 0.3;
                 ctx.fillStyle = '#ff2222';
                 ctx.fillRect(this.x-3, this.y-3, this.width+6, this.height+6);
                 ctx.restore();
             }
-            // ！マーク点滅
-            ctx.fillStyle = '#ff4444'; ctx.font = 'bold 20px monospace'; ctx.textAlign = 'center';
-            if (Math.sin(Date.now() * 0.01) > 0) {
-                ctx.fillText('!', this.x + this.width/2, this.y - 15);
+            // 攻撃タイプ別警告マーク
+            const mcx = this.x+this.width/2, mcy = this.y+this.height/2;
+            ctx.font = 'bold 24px monospace'; ctx.textAlign = 'center';
+            if (this.atkType === 'aoe') {
+                ctx.fillStyle = '#aa44aa'; ctx.fillText('\u25ce', mcx, this.y-12); // ◎
+                // 範囲表示（赤い円）
+                ctx.save(); ctx.globalAlpha = 0.15;
+                ctx.fillStyle = '#ff2222';
+                ctx.beginPath(); ctx.arc(mcx, mcy, this.isBoss?150:80, 0, Math.PI*2); ctx.fill();
+                ctx.restore();
+            } else if (this.atkType === 'charge') {
+                ctx.fillStyle = '#ff8800'; ctx.fillText('\u2192\u2192\u2192', mcx, this.y-12); // →→→
+            } else {
+                ctx.fillStyle = '#ff4444';
+                if (Math.sin(Date.now()*0.01) > 0) ctx.fillText('\u26a0', mcx, this.y-12); // ⚠
             }
+        }
+        // フェーズ3: 硬直（OPENING!）
+        if (this.atkPhase === 'recovery') {
+            ctx.fillStyle = '#44ff44'; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
+            ctx.fillText('OPENING!', this.x+this.width/2, this.y-10);
         }
         // 怒りフラッシュ
         if (this.enraged && this.enrageFlashTimer > 250) {
