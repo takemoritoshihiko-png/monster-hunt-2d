@@ -8,7 +8,7 @@ import { DroppedItem, Arrow } from './weapon.js';
 import { Inventory } from './inventory.js';
 import { Player } from './player.js';
 import { Monster } from './monster.js';
-import { Companion } from './companion.js';
+import { Companion, PARTY_BONUSES } from './companion.js';
 
 // ========================================
 // ローグライクモード定数
@@ -132,8 +132,14 @@ class Game {
         // ヒットストップ
         this.hitStopFrames = 0;
         // ゲーム内時間（昼夜サイクル: 60秒=1サイクル）
-        this.gameTime = 0;       // 秒
+        this.gameTime = 0;
         this.isNight = false;
+        // パーティ（2スロット）
+        this.partySlots = [null, null]; // Companion references
+        this.activeCompanions = [];     // フィールド上の仲間
+        this.partyBonus = null;
+        this.partyCursor = 0;
+        this.partyTab = 0; // 0=スロット, 1=一覧
 
         // 結果画面演出用
         this.resultAnimTimer = 0; // 経過時間（秒）
@@ -417,13 +423,28 @@ class Game {
         this.currentQuest = quest;
         this.player = new Player(WORLD_W/2-16, WORLD_H/2+200, this.inventory);
         this.applyLoadedStats(this.player);
-        // 仲間の配置
+        // パーティメンバーの配置
+        this.activeCompanions = [];
         this.activeCompanion = null;
-        if (this.inventory.activeCompanion) {
+        for (let i = 0; i < 2; i++) {
+            const c = this.partySlots[i];
+            if (!c) continue;
+            c.x = this.player.x + (i===0 ? -80 : 80);
+            c.y = this.player.y + 80;
+            c.followOffsetX = (i===0 ? -80 : 80);
+            c.followOffsetY = 80;
+            c.hp = c.maxHp; c.alive = true;
+            c._recalcStats();
+            this.activeCompanions.push(c);
+        }
+        if (this.activeCompanions.length > 0) this.activeCompanion = this.activeCompanions[0];
+        // 旧互換: inventory.activeCompanionも設定
+        if (!this.activeCompanion && this.inventory.activeCompanion) {
             const c = this.inventory.activeCompanion;
             c.x = this.player.x + 50; c.y = this.player.y + 30;
             c.hp = c.maxHp; c.alive = true;
             this.activeCompanion = c;
+            this.activeCompanions = [c];
         }
         this.monsters = quest.monsters.map(m=>new Monster(m.name,m.x,m.y,m.config));
         this.droppedItems=[]; this.arrows=[]; this.particles=[]; this.iceBreaths=[]; this.damageNumbers=[];
@@ -518,6 +539,7 @@ class Game {
                 if (key==='i') {this.state='inventory';this._returnToLobby=true;this.invTab=0;this.invCursor=0;return;}
                 if (key==='c') {this.state='craft';this.craftCursor=0;this.craftTab=0;this._returnToLobby=true;return;}
                 if (key==='p') {this.state='skillTree';this._returnToLobby=true;this.skillTreeCursor={branch:'common',idx:0};return;}
+                if (key==='b') {this.state='party';this._returnToLobby=true;this.partyCursor=0;this.partyTab=0;return;}
                 if (key==='m') { this.startRoguelike(); return; }
                 return;
             }
@@ -571,6 +593,16 @@ class Game {
                     else if (key==='arrowdown'||key==='s') this.upgradeCursor=Math.min(items.length-1,this.upgradeCursor+1);
                     else if (key==='enter'||key==='z') this.executeUpgrade(items);
                 }
+                return;
+            }
+            // パーティ画面
+            if (this.state==='party') {
+                if (key==='b'||key==='escape') { this.state=this._returnToLobby?'lobby':'playing'; this._returnToLobby=false; return; }
+                if (key==='arrowleft'||key==='a') this.partyTab=0;
+                if (key==='arrowright'||key==='d') this.partyTab=1;
+                if (key==='arrowup'||key==='w') this.partyCursor=Math.max(0,this.partyCursor-1);
+                if (key==='arrowdown'||key==='s') this.partyCursor++;
+                if (key==='z'||key==='enter') this.handlePartyAction();
                 return;
             }
             // ローグライクカード選択
@@ -640,6 +672,7 @@ class Game {
             }
             if (key==='r') this.tryUltimate();
             if (key==='p') { this.state='skillTree'; this._returnToLobby=false; this.skillTreeCursor={branch:'common',idx:0}; }
+            if (key==='b') { this.state='party'; this._returnToLobby=false; this.partyCursor=0; this.partyTab=0; }
             if (key==='q') { this.player.cycleWeapon(); this.weaponSwitchMessage=`Equipped: ${this.player.weapon.name}`; this.weaponSwitchTimer=1500; }
         });
         window.addEventListener('keyup',(e)=>{
@@ -824,6 +857,42 @@ class Game {
         }
         Sound.playQuestFailed();
         this.state = 'rogueOver';
+    }
+
+    handlePartyAction() {
+        if (this.partyTab === 0) {
+            // スロット操作: 外す
+            const idx = this.partyCursor;
+            if (idx < 2 && this.partySlots[idx]) {
+                this.partySlots[idx] = null;
+                this.calcPartyBonus();
+            }
+        } else {
+            // 一覧から追加
+            const comps = this.inventory.companions;
+            if (this.partyCursor >= comps.length) return;
+            const c = comps[this.partyCursor];
+            // 空きスロットに追加
+            if (!this.partySlots[0]) { this.partySlots[0] = c; }
+            else if (!this.partySlots[1]) { this.partySlots[1] = c; }
+            else { this.partySlots[0] = c; } // 上書き
+            this.calcPartyBonus();
+        }
+    }
+
+    calcPartyBonus() {
+        this.partyBonus = null;
+        const types = this.partySlots.filter(s=>s).map(s=>s.type).sort();
+        for (const b of PARTY_BONUSES) {
+            const bt = [...b.types].sort();
+            if (types.length === bt.length && types.every((t,i)=>t===bt[i])) {
+                this.partyBonus = b; break;
+            }
+            // Giant Drake Miniは1体でもOK
+            if (bt.length === 1 && types.includes(bt[0])) {
+                this.partyBonus = b; break;
+            }
+        }
     }
 
     /** 群れ行動更新 */
@@ -1220,13 +1289,14 @@ class Game {
         if (this.totalHunts >= 1 && !this.inventory.title) this.inventory.title = 'Novice Hunter';
         if (this.totalHunts >= 10 && this.inventory.title === 'Novice Hunter') this.inventory.title = 'Hunter';
         if (monster.name === 'Giant Drake' && this.inventory.title !== 'Dragon Slayer') this.inventory.title = 'Drake Slayer';
-        // 仲間EXP獲得（プレイヤーの半分）
-        if (this.activeCompanion && this.activeCompanion.alive) {
-            const cExpAmount = Math.floor((MONSTER_EXP[monster.name] || 50) / 2);
-            const cLeveled = this.activeCompanion.addExp(cExpAmount);
+        // 全パーティメンバーEXP獲得
+        const cExpBase = monster.isBoss ? 150 : 30;
+        for (const comp of this.activeCompanions) {
+            if (!comp.alive) continue;
+            const cLeveled = comp.addExp(cExpBase);
             if (cLeveled) {
-                this.damageNumbers.push(new DamageNumber(this.activeCompanion.x, this.activeCompanion.y-20, 0, '#ffcc00', 'LEVEL UP!'));
-                for (let i=0;i<8;i++) { const a=Math.random()*Math.PI*2; this.particles.push(new Particle(this.activeCompanion.x+14, this.activeCompanion.y+14, Math.cos(a)*50, Math.sin(a)*50-30, '#ffcc00', 400, 2)); }
+                this.damageNumbers.push(new DamageNumber(comp.x, comp.y-20, 0, '#ffcc00', 'LEVEL UP!'));
+                for (let i=0;i<8;i++) { const a=Math.random()*Math.PI*2; this.particles.push(new Particle(comp.x+14, comp.y+14, Math.cos(a)*50, Math.sin(a)*50-30, '#ffcc00', 400, 2)); }
             }
         }
         // EXP獲得
@@ -1376,28 +1446,24 @@ class Game {
             this.state='gameover'; return;
         }
         this.player.update(dt, this.keys, WORLD_W, WORLD_H, TREES);
-        // 仲間更新
-        if (this.activeCompanion && this.activeCompanion.alive) {
-            const hitResult = this.activeCompanion.update(dt, this.player, this.monsters);
+        // 全パーティメンバー更新
+        for (const comp of this.activeCompanions) {
+            if (!comp.alive) continue;
+            const hitResult = comp.update(dt, this.player, this.monsters);
             if (hitResult && hitResult.hit) {
-                this.damageNumbers.push(new DamageNumber(hitResult.target.x+hitResult.target.width/2, hitResult.target.y-10, hitResult.dmg, '#aaffaa', ''));
-                // 控えめな火花
+                const label = hitResult.isRush ? 'RUSH!' : '';
+                this.damageNumbers.push(new DamageNumber(hitResult.target.x+hitResult.target.width/2, hitResult.target.y-10, hitResult.dmg, '#aaffaa', label));
                 for (let i=0;i<3;i++) { const a=Math.random()*Math.PI*2; this.particles.push(new Particle(hitResult.target.x+hitResult.target.width/2,hitResult.target.y+hitResult.target.height/2,Math.cos(a)*40,Math.sin(a)*40-20,'#aaffaa',200,2)); }
                 Sound.playHit();
                 if (!hitResult.target.alive) { Sound.playMonsterDie(); this.onMonsterDefeated(hitResult.target); }
             }
-            // モンスターから仲間への攻撃判定
+            // 被ダメージ
             for (const m of this.monsters) {
-                if (!m.alive || m.state !== 'attack') continue;
-                const dx = (m.x+m.width/2) - (this.activeCompanion.x+14);
-                const dy = (m.y+m.height/2) - (this.activeCompanion.y+14);
-                if (Math.sqrt(dx*dx+dy*dy) < m.attackRange + 20) {
-                    if (m.attackTimer > m.attackCooldown * 0.95) {
-                        this.activeCompanion.takeDamage(Math.floor(m.attackDamage * 0.5));
-                        if (!this.activeCompanion.alive) {
-                            this.damageNumbers.push(new DamageNumber(this.activeCompanion.x, this.activeCompanion.y-20, 0, '#ff4444', `${this.activeCompanion.name}が倒れた...`));
-                        }
-                    }
+                if (!m.alive || m.atkPhase !== 'strike') continue;
+                const dx = (m.x+m.width/2)-(comp.x+14), dy = (m.y+m.height/2)-(comp.y+14);
+                if (Math.sqrt(dx*dx+dy*dy) < m.attackRange+20) {
+                    comp.takeDamage(Math.floor(m.attackDamage*0.5));
+                    if (!comp.alive) this.damageNumbers.push(new DamageNumber(comp.x,comp.y-20,0,'#ff4444',`${comp.name}が倒れた...`));
                 }
             }
         }
@@ -1526,6 +1592,9 @@ class Game {
             case 'skillTree':
                 if (this._returnToLobby) this.drawLobby(ctx); else this.drawField(ctx);
                 this.drawSkillTree(ctx); break;
+            case 'party':
+                if (this._returnToLobby) this.drawLobby(ctx); else this.drawField(ctx);
+                this.drawPartyScreen(ctx); break;
             case 'rogueCard': this.drawField(ctx); this.drawRogueCardSelect(ctx); break;
             case 'rogueOver': this.drawField(ctx); this.drawRogueOver(ctx); break;
             case 'bossIntro': this.drawBossIntro(ctx); break;
@@ -1651,9 +1720,9 @@ class Game {
             ctx.restore();
         }
         if (this.player) { ctx.save(); this.player.draw(ctx, this.images.player); ctx.restore(); }
-        // 仲間描画
-        if (this.activeCompanion && this.activeCompanion.alive) {
-            ctx.save(); this.activeCompanion.draw(ctx); ctx.restore();
+        // 全パーティメンバー描画
+        for (const comp of this.activeCompanions) {
+            if (comp.alive) { ctx.save(); comp.draw(ctx); ctx.restore(); }
         }
         // 氷の息
         for (const ib of this.iceBreaths) {
@@ -1923,34 +1992,33 @@ class Game {
             ctx.fillText(this.weaponSwitchMessage,400,400);
         }
         ctx.fillStyle='rgba(255,255,255,0.5)';ctx.font='12px monospace';ctx.textAlign='center';
-        ctx.fillText('WASD:Move  Z:Atk  X:Block  Shift:Dodge  R:Ult  Q:Switch  P:Skills',this.W/2,this.H-10);
-        // 仲間ステータスパネル（左下）
-        if (this.activeCompanion && this.activeCompanion.alive) {
-            const c = this.activeCompanion;
-            const cpX = 15, cpY = this.H - 70;
+        ctx.fillText('WASD:Move  Z:Atk  X:Block  Shift:Dodge  R:Ult  Q:Swap  B:Party  P:Skills',this.W/2,this.H-10);
+        // パーティメンバーステータスパネル（左下）
+        let cpIdx = 0;
+        for (const c of this.activeCompanions) {
+            if (!c.alive) { cpIdx++; continue; }
+            const cpX = 15, cpY = this.H - 70 - cpIdx*60;
             ctx.fillStyle = 'rgba(10,10,20,0.7)';
-            roundRect(ctx, cpX, cpY, 160, 55, 6); ctx.fill();
+            roundRect(ctx, cpX, cpY, 160, 52, 6); ctx.fill();
             ctx.strokeStyle = '#444'; ctx.lineWidth = 1;
-            roundRect(ctx, cpX, cpY, 160, 55, 6); ctx.stroke();
-            // アイコン
+            roundRect(ctx, cpX, cpY, 160, 52, 6); ctx.stroke();
             ctx.fillStyle = c.color;
-            ctx.beginPath(); ctx.arc(cpX+18, cpY+18, 10, 0, Math.PI*2); ctx.fill();
-            // 名前・レベル
-            ctx.fillStyle = '#fff'; ctx.font = '11px monospace'; ctx.textAlign = 'left';
-            ctx.fillText(`Lv.${c.level} ${c.name}`, cpX+32, cpY+16);
-            // HPバー
-            const hpR = c.hp / c.maxHp;
-            ctx.fillStyle = '#222'; roundRect(ctx, cpX+32, cpY+22, 115, 8, 3); ctx.fill();
-            ctx.save(); roundRect(ctx, cpX+32, cpY+22, 115, 8, 3); ctx.clip();
-            ctx.fillStyle = hpR > 0.3 ? '#44cc44' : '#cc4444';
-            ctx.fillRect(cpX+32, cpY+22, 115*hpR, 8);
+            ctx.beginPath(); ctx.arc(cpX+16, cpY+16, 9, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.font = '10px monospace'; ctx.textAlign = 'left';
+            ctx.fillText(`Lv.${c.level} ${c.name}`, cpX+30, cpY+14);
+            const hpR = c.hp/c.maxHp;
+            ctx.fillStyle = '#222'; roundRect(ctx, cpX+30, cpY+20, 118, 7, 2); ctx.fill();
+            ctx.save(); roundRect(ctx, cpX+30, cpY+20, 118, 7, 2); ctx.clip();
+            ctx.fillStyle = hpR>0.3?'#44cc44':'#cc4444'; ctx.fillRect(cpX+30, cpY+20, 118*hpR, 7);
             ctx.restore();
-            ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
-            ctx.fillText(`${c.hp}/${c.maxHp}`, cpX+32, cpY+42);
-            // EXPバー
-            const expR = c.exp / c.expToNext;
-            ctx.fillStyle = '#111'; ctx.fillRect(cpX+32, cpY+44, 115, 4);
-            ctx.fillStyle = '#4488cc'; ctx.fillRect(cpX+32, cpY+44, 115*expR, 4);
+            ctx.fillStyle = '#888'; ctx.font = '7px monospace';
+            ctx.fillText(`HP:${c.hp}/${c.maxHp} ATK:${c.atk}`, cpX+30, cpY+40);
+            cpIdx++;
+        }
+        // パーティボーナス表示
+        if (this.partyBonus) {
+            ctx.fillStyle = '#c8a800'; ctx.font = '9px monospace'; ctx.textAlign = 'left';
+            ctx.fillText(`${this.partyBonus.name}: ${this.partyBonus.desc}`, 15, this.H - 70 - cpIdx*60 - 5);
         }
         // ミニマップ描画
         this.drawMinimap(ctx);
@@ -2205,6 +2273,115 @@ class Game {
 
         ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '12px monospace'; ctx.textAlign = 'center';
         ctx.fillText('A/D:Branch  W/S:Select  Z:Learn  P:Close', W/2, H-18);
+        ctx.restore();
+    }
+
+    // ========================================
+    // パーティ画面
+    // ========================================
+    drawPartyScreen(ctx) {
+        ctx.save(); ctx.globalAlpha = 1;
+        const W = this.W, H = this.H;
+        // 金属背景
+        ctx.fillStyle = '#1a1a22'; ctx.fillRect(0, 0, W, H);
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
+        for (let x=0;x<W;x+=20){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+        for (let y=0;y<H;y+=20){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+        ctx.strokeStyle='#c8a800';ctx.lineWidth=3;ctx.strokeRect(5,5,W-10,H-10);
+        // タイトル
+        const tg=ctx.createLinearGradient(0,18,0,52);
+        tg.addColorStop(0,'#3a3a44');tg.addColorStop(0.5,'#4a4a55');tg.addColorStop(1,'#2a2a33');
+        ctx.fillStyle=tg;ctx.fillRect(10,18,W-20,36);
+        ctx.fillStyle='#c8a800';ctx.font='bold 22px monospace';ctx.textAlign='center';
+        ctx.fillText('PARTY',W/2,43);
+
+        const leftW = Math.floor(W*0.45), rightX = leftW+20;
+
+        // === 左側: パーティスロット ===
+        ctx.fillStyle='#c8a800';ctx.font='bold 14px monospace';ctx.textAlign='left';
+        ctx.fillText('Party Slots', 25, 75);
+        for (let i = 0; i < 2; i++) {
+            const sy = 90 + i*130;
+            const c = this.partySlots[i];
+            const sel = this.partyTab===0 && this.partyCursor===i;
+            ctx.fillStyle = sel ? 'rgba(200,168,0,0.12)' : '#111122';
+            roundRect(ctx, 20, sy, leftW-30, 115, 8); ctx.fill();
+            ctx.strokeStyle = sel ? '#c8a800' : '#333'; ctx.lineWidth = sel?2:1;
+            roundRect(ctx, 20, sy, leftW-30, 115, 8); ctx.stroke();
+            if (c) {
+                // アイコン
+                ctx.fillStyle = c.color;
+                ctx.beginPath(); ctx.arc(50, sy+35, 18, 0, Math.PI*2); ctx.fill();
+                // 名前・ステータス
+                ctx.fillStyle='#fff';ctx.font='bold 13px monospace';ctx.textAlign='left';
+                ctx.fillText(`Lv.${c.level} ${c.name}`, 75, sy+25);
+                ctx.fillStyle='#aaa';ctx.font='11px monospace';
+                ctx.fillText(`HP:${c.maxHp}  ATK:${c.atk}`, 75, sy+42);
+                ctx.fillText(`Kills:${c.totalKills}`, 75, sy+57);
+                // スキル
+                const skills = Companion.getSkills(c.type);
+                let skY = sy+72;
+                for (const s of skills) {
+                    const has = c.level >= s.level;
+                    ctx.fillStyle = has ? '#c8a800' : '#444'; ctx.font = '9px monospace';
+                    ctx.fillText(`${has?'\u2605':'\u2606'} ${s.name}(Lv${s.level})`, 35, skY);
+                    skY += 13;
+                }
+                // 装備表示
+                ctx.fillStyle='#777';ctx.font='9px monospace';
+                ctx.fillText(c.equippedWeapon?`W:${c.equippedWeapon.name}`:'W: ---', 200, sy+25);
+                ctx.fillText(c.equippedArmor?`A:${c.equippedArmor.name}`:'A: ---', 200, sy+38);
+                // 外すボタン
+                if (sel) {
+                    ctx.fillStyle='#662222';roundRect(ctx,leftW-100,sy+85,60,22,3);ctx.fill();
+                    ctx.fillStyle='#ff8888';ctx.font='bold 10px monospace';ctx.textAlign='center';
+                    ctx.fillText('REMOVE',leftW-70,sy+100);ctx.textAlign='left';
+                }
+            } else {
+                ctx.fillStyle='#555';ctx.font='14px monospace';ctx.textAlign='center';
+                ctx.fillText('+ Add Companion',leftW/2,sy+55);ctx.textAlign='left';
+            }
+        }
+        // パーティボーナス表示
+        if (this.partyBonus) {
+            ctx.fillStyle='#c8a800';ctx.font='bold 12px monospace';ctx.textAlign='left';
+            ctx.fillText(`Bonus: ${this.partyBonus.name} - ${this.partyBonus.desc}`, 25, 360);
+        }
+
+        // === 右側: 所持仲間一覧 ===
+        ctx.fillStyle='#c8a800';ctx.font='bold 14px monospace';ctx.textAlign='left';
+        ctx.fillText('Companions', rightX, 75);
+        const comps = this.inventory.companions;
+        if (comps.length===0) {
+            ctx.fillStyle='#555';ctx.font='12px monospace';
+            ctx.fillText('No companions yet', rightX+10, 110);
+        } else {
+            let cy = 90;
+            for (let i=0;i<comps.length;i++) {
+                const c = comps[i];
+                const sel = this.partyTab===1 && this.partyCursor===i;
+                const inParty = this.partySlots.includes(c);
+                ctx.fillStyle = sel ? 'rgba(200,168,0,0.12)' : '#111122';
+                roundRect(ctx, rightX, cy, W-rightX-20, 40, 6); ctx.fill();
+                ctx.strokeStyle = inParty ? '#c8a800' : (sel?'#c8a800':'#333');
+                ctx.lineWidth = sel||inParty?2:1;
+                roundRect(ctx, rightX, cy, W-rightX-20, 40, 6); ctx.stroke();
+                ctx.fillStyle = c.color;
+                ctx.beginPath(); ctx.arc(rightX+18, cy+20, 10, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = sel?'#fff':'#bbb';ctx.font='bold 11px monospace';ctx.textAlign='left';
+                ctx.fillText(`Lv.${c.level} ${c.name}`, rightX+35, cy+16);
+                ctx.fillStyle='#888';ctx.font='9px monospace';
+                ctx.fillText(`HP:${c.maxHp} ATK:${c.atk} Kills:${c.totalKills}`, rightX+35, cy+30);
+                if (inParty) {
+                    ctx.fillStyle='#c8a800';ctx.textAlign='right';ctx.font='9px monospace';
+                    ctx.fillText('[IN PARTY]',W-25,cy+20);ctx.textAlign='left';
+                }
+                cy += 46;
+            }
+        }
+
+        ctx.fillStyle='rgba(255,255,255,0.35)';ctx.font='12px monospace';ctx.textAlign='center';
+        ctx.fillText('A/D:Tab  W/S:Select  Z:Add/Remove  B:Close',W/2,H-18);
         ctx.restore();
     }
 
