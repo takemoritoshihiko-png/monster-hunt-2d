@@ -131,6 +131,9 @@ class Game {
         this.shakeTimer = 0; this.shakeIntensity = 0;
         // ヒットストップ
         this.hitStopFrames = 0;
+        // ゲーム内時間（昼夜サイクル: 60秒=1サイクル）
+        this.gameTime = 0;       // 秒
+        this.isNight = false;
 
         // 結果画面演出用
         this.resultAnimTimer = 0; // 経過時間（秒）
@@ -823,6 +826,34 @@ class Game {
         this.state = 'rogueOver';
     }
 
+    /** 群れ行動更新 */
+    updatePacks() {
+        // 同種モンスターの群れを形成
+        const byName = {};
+        for (const m of this.monsters) {
+            if (!m.alive || m.isBoss) continue;
+            if (!byName[m.name]) byName[m.name] = [];
+            byName[m.name].push(m);
+        }
+        for (const [name, pack] of Object.entries(byName)) {
+            if (pack.length < 2) { for (const m of pack) m.packLeader=null; continue; }
+            // リーダー=HP最大
+            const leader = pack.reduce((a,b) => a.hp > b.hp ? a : b);
+            for (const m of pack) m.packLeader = leader;
+            // リーダーがダメージを受けていたら群れ怒り
+            if (leader.hitFlashTimer > 0) {
+                for (const m of pack) {
+                    m.packRage = true;
+                    m.speed = Math.floor(m.baseSpeed * 1.2);
+                }
+            }
+            // リーダーが死んだら残りが逃走解除
+            if (!leader.alive) {
+                for (const m of pack) { m.packRage = false; m.packLeader = null; }
+            }
+        }
+    }
+
     learnTreeSkill() {
         if (!this.player || this.player.skillPoints <= 0) return;
         const c = this.skillTreeCursor;
@@ -1151,6 +1182,19 @@ class Game {
             for (const d of drops) d.count += this.player.skillExtraDrop;
         }
         this.droppedItems.push(...drops);
+        // RESCUE BONUS: 逃走中モンスターを倒した場合
+        if (monster.fleeingFromPredator) {
+            this.damageNumbers.push(new DamageNumber(monster.x+monster.width/2, monster.y-30, 0, '#44ffaa', 'RESCUE BONUS!'));
+            // 追加ドロップ+1
+            const extraDrops = monster.generateDrops();
+            for (const d of extraDrops) d.count = 1;
+            this.droppedItems.push(...extraDrops);
+        }
+        // 縄張り争い中のモンスターを倒した場合、相手を解放
+        if (monster.territoryFight) {
+            monster.territoryFight.territoryFight = null;
+            monster.territoryFight.ecoState = 'normal';
+        }
         // ローグライクモードの場合は専用処理
         if (this.rogueActive) {
             this.onRogueMonsterDefeated(monster);
@@ -1375,6 +1419,13 @@ class Game {
             }
         }
         for (const m of this.monsters) if (m.alive) m.update(dt, this.player, this);
+        // 生態系更新
+        for (const m of this.monsters) if (m.alive) m.updateEcosystem(dt, this.monsters, this);
+        // 群れ行動
+        this.updatePacks();
+        // 昼夜サイクル
+        this.gameTime += dt;
+        this.isNight = (this.gameTime % 60) > 30;
 
         for (const arrow of this.arrows) {
             arrow.update(dt, this.canvas.width, this.canvas.height);
@@ -1643,6 +1694,17 @@ class Game {
             ctx.globalAlpha = Math.min(1, this.skillPointHintTimer / 500);
             ctx.fillStyle = '#ffcc00'; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
             ctx.fillText('スキルポイントを獲得！PキーでSkill Treeを開こう', this.W/2, 220);
+            ctx.restore();
+        }
+        // 昼夜サイクル描画
+        if (this.isNight) {
+            ctx.save();
+            ctx.fillStyle = 'rgba(0,0,30,0.25)';
+            ctx.fillRect(0, 0, this.W, this.H);
+            // 月
+            ctx.globalAlpha = 0.3;
+            ctx.fillStyle = '#dddde8';
+            ctx.beginPath(); ctx.arc(this.W-80, 50, 18, 0, Math.PI*2); ctx.fill();
             ctx.restore();
         }
         // ボス第2形態 赤ビネット
@@ -2328,6 +2390,16 @@ class Game {
             const mx = mmX + (m.x + m.width / 2) * scaleX;
             const my = mmY + (m.y + m.height / 2) * scaleY;
             ctx.beginPath(); ctx.arc(mx, my, m.isBoss ? 3 : 2, 0, Math.PI * 2); ctx.fill();
+        }
+        // 縄張り争い赤点滅
+        for (const m of this.monsters) {
+            if (!m.alive || m.ecoState !== 'territory') continue;
+            if (Math.sin(Date.now()*0.01) > 0) {
+                ctx.fillStyle = '#ff4444';
+                const mx2 = mmX + (m.x+m.width/2)*scaleX;
+                const my2 = mmY + (m.y+m.height/2)*scaleY;
+                ctx.beginPath(); ctx.arc(mx2, my2, 4, 0, Math.PI*2); ctx.fill();
+            }
         }
         // プレイヤー（白い点）
         if (this.player) {

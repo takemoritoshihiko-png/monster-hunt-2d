@@ -77,6 +77,13 @@ export class Monster {
         this.atkType = 'normal'; // 'normal'|'charge'|'aoe'
         this._strikeDealt = false;
         this.hasSkill_tk_shield = false;
+        // 生態系
+        this.territoryFight = null;    // 縄張り争い相手
+        this.territoryFightTimer = 0;
+        this.packLeader = null;        // 群れリーダー
+        this.packRage = false;         // 群れ怒り状態
+        this.fleeingFromPredator = false; // 上位捕食者から逃走中
+        this.ecoState = 'normal';      // 'normal'|'territory'|'packRage'|'fleePredator'
     }
     _initWeakZones() {
         const n = this.name;
@@ -127,12 +134,89 @@ export class Monster {
         if (this.isIceWolf && Math.random() < 0.4) return 'charge';
         return 'normal';
     }
+
+    /** 生態系: 他モンスターとのインタラクション（game.update内から呼ぶ） */
+    updateEcosystem(dt, monsters, game) {
+        if (!this.alive || this.isBoss) return;
+
+        // 上位捕食者（Giant/Elder Drake）からの逃走
+        for (const m of monsters) {
+            if (!m.alive || m === this || !m.isBoss) continue;
+            const d = Math.sqrt((m.x+m.width/2-this.x-this.width/2)**2+(m.y+m.height/2-this.y-this.height/2)**2);
+            if (d < 200) {
+                this.fleeingFromPredator = true;
+                this.ecoState = 'fleePredator';
+                // 逃げる方向
+                const dx = this.x - m.x, dy = this.y - m.y;
+                const dd = Math.sqrt(dx*dx+dy*dy) || 1;
+                this.x += (dx/dd) * this.speed * 1.5 * dt;
+                this.y += (dy/dd) * this.speed * 1.5 * dt;
+                return;
+            }
+        }
+        this.fleeingFromPredator = false;
+
+        // 縄張り争い（異種間）
+        if (!this.territoryFight) {
+            for (const m of monsters) {
+                if (!m.alive || m === this || m.isBoss) continue;
+                if (m.name === this.name) continue; // 同種はスキップ
+                const d = Math.sqrt((m.x+m.width/2-this.x-this.width/2)**2+(m.y+m.height/2-this.y-this.height/2)**2);
+                if (d < 200 && !m.territoryFight) {
+                    this.territoryFight = m;
+                    m.territoryFight = this;
+                    this.ecoState = 'territory';
+                    m.ecoState = 'territory';
+                    this.territoryFightTimer = 0;
+                    m.territoryFightTimer = 0;
+                }
+            }
+        }
+
+        // 縄張り戦闘処理
+        if (this.territoryFight) {
+            const rival = this.territoryFight;
+            if (!rival.alive) { this.territoryFight = null; this.ecoState = 'normal'; this.hp = Math.min(this.maxHp, this.hp + Math.floor(this.maxHp*0.2)); return; }
+            this.territoryFightTimer += dt * 1000;
+            // 1秒ごとにダメージ交換
+            if (this.territoryFightTimer > 1000) {
+                this.territoryFightTimer = 0;
+                rival.hp -= Math.floor(this.attackDamage * 0.5);
+                this.hp -= Math.floor(rival.attackDamage * 0.5);
+                rival.hitFlashTimer = 100;
+                this.hitFlashTimer = 100;
+                if (game) {
+                    game.damageNumbers.push(new DamageNumber(rival.x+rival.width/2, rival.y-10, Math.floor(this.attackDamage*0.5), '#ffaa44', ''));
+                    game.damageNumbers.push(new DamageNumber(this.x+this.width/2, this.y-10, Math.floor(rival.attackDamage*0.5), '#ffaa44', ''));
+                }
+            }
+            // 負けた方が逃走
+            if (this.hp < this.maxHp * 0.3) {
+                this.territoryFight = null;
+                rival.territoryFight = null;
+                rival.ecoState = 'normal';
+                rival.hp = Math.min(rival.maxHp, rival.hp + Math.floor(rival.maxHp*0.2));
+                this.ecoState = 'normal';
+                // 強制逃走
+                this.enraged = false;
+            } else if (rival.hp < rival.maxHp * 0.3) {
+                this.territoryFight = null;
+                rival.territoryFight = null;
+                this.ecoState = 'normal';
+                this.hp = Math.min(this.maxHp, this.hp + Math.floor(this.maxHp*0.2));
+                rival.ecoState = 'normal';
+            }
+        }
+    }
+
     update(dt, player, game) {
         if (!this.alive) return;
         // 遅延HPバー更新
         if (this.displayHp > this.hp) {
             this.displayHp = Math.max(this.hp, this.displayHp - this.maxHp * dt * 0.8);
         }
+        // 縄張り争い中・上位捕食者逃走中はプレイヤー攻撃を行わない
+        if (this.territoryFight || this.fleeingFromPredator) return;
         // 凍結中は動けない
         if (this.frozenTimer > 0) {
             this.frozenTimer -= dt * 1000;
@@ -515,6 +599,21 @@ export class Monster {
                 ctx.fillStyle = '#ff4444';
                 if (Math.sin(Date.now()*0.01) > 0) ctx.fillText('\u26a0', mcx, this.y-12); // ⚠
             }
+        }
+        // 縄張り争いマーク
+        if (this.ecoState === 'territory') {
+            ctx.fillStyle = '#ff8844'; ctx.font = 'bold 14px monospace'; ctx.textAlign = 'center';
+            ctx.fillText('\u2694', this.x+this.width/2, this.y-15); // ⚔
+        }
+        // 上位捕食者逃走
+        if (this.fleeingFromPredator) {
+            ctx.fillStyle = '#ffcc00'; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
+            ctx.fillText('!!', this.x+this.width/2, this.y-12);
+        }
+        // 群れ怒り
+        if (this.packRage) {
+            ctx.strokeStyle = 'rgba(255,80,80,0.3)'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(this.x+this.width/2, this.y+this.height/2, this.width*0.7, 0, Math.PI*2); ctx.stroke();
         }
         // フェーズ3: 硬直（OPENING!）
         if (this.atkPhase === 'recovery') {
