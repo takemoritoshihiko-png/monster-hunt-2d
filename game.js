@@ -11,6 +11,28 @@ import { Monster } from './monster.js';
 import { Companion } from './companion.js';
 
 // ========================================
+// ローグライクモード定数
+// ========================================
+const ROGUE_CARDS = [
+    { id:'blood',   name:'血の契約',  desc:'HP-20・ダメージ+30%',   apply:(p,g)=>{p.maxHp=Math.max(20,p.maxHp-20);p.hp=Math.min(p.hp,p.maxHp);g._rogueAtkMult*=1.3;} },
+    { id:'sharp',   name:'鋭利化',    desc:'近距離ダメージ+20%',    apply:(p,g)=>{p.skillMeleeMult*=1.2;} },
+    { id:'swift',   name:'素早さ',    desc:'移動速度+15%・回避+20%', apply:(p,g)=>{p.baseSpeed=Math.floor(p.baseSpeed*1.15);} },
+    { id:'heal',    name:'回復',      desc:'HP全回復',              apply:(p,g)=>{p.hp=p.maxHp;} },
+    { id:'explode', name:'爆発矢',    desc:'矢ヒット時に爆発ダメ',  apply:(p,g)=>{g._rogueExplode=true;} },
+    { id:'dual',    name:'二刀流',    desc:'攻撃2回ヒット・各×0.7', apply:(p,g)=>{g._rogueDual=true;} },
+    { id:'vampire', name:'吸血',      desc:'攻撃ヒット時HP+3',      apply:(p,g)=>{g._rogueVampire=true;} },
+    { id:'rage',    name:'怒り',      desc:'HP50%以下でダメージ+50%', apply:(p,g)=>{g._rogueRage=true;} },
+    { id:'guard',   name:'守護',      desc:'被ダメージ-25%',        apply:(p,g)=>{p.skillDefMult*=0.75;} },
+    { id:'chain',   name:'連鎖',      desc:'敵撃破で周囲に50ダメ',   apply:(p,g)=>{g._rogueChain=true;} },
+];
+
+const ROGUE_FLOOR_MONSTERS = ['Forest Drake','Ice Wolf','Forest Drake','Ice Wolf'];
+const ROGUE_BOSS_CONFIGS = {
+    5:  [{ name:'Giant Drake', config:{ hp:2000,width:132,height:132,speed:70,color:'#882222',attackDamage:18,attackRange:90,attackCooldown:1000,aggroRange:350,dropTableId:'giantDrake',isBoss:true }}],
+    10: [{ name:'Elder Drake', config:{ hp:3000,width:180,height:180,speed:100,color:'#220022',attackDamage:25,attackRange:100,attackCooldown:800,aggroRange:450,dropTableId:'giantDrake',isBoss:true,isElder:true }}],
+};
+
+// ========================================
 // ゲームメインクラス
 // ========================================
 class Game {
@@ -41,6 +63,23 @@ class Game {
         // スキルツリー
         this.skillTreeCursor = { branch: 'common', idx: 0 };
         this.skillPointHintTimer = 0;
+        // ローグライクモード
+        this.rogueActive = false;
+        this.rogueFloor = 0;
+        this.rogueEnemiesLeft = 0;
+        this.rogueKills = 0;
+        this.rogueCards = [];          // 取得済みカード
+        this.rogueCardChoices = [];    // 3択カード
+        this.rogueCardCursor = 0;
+        this.rogueFloorClearTimer = 0;
+        this._rogueAtkMult = 1.0;
+        this._rogueExplode = false;
+        this._rogueDual = false;
+        this._rogueVampire = false;
+        this._rogueRage = false;
+        this._rogueChain = false;
+        this.rogueBestFloor = 0;
+        try { this.rogueBestFloor = parseInt(localStorage.getItem('mh2d_rogueBest') || '0'); } catch(e){}
         // ガチャ演出
         this.gachaActive = false;
         this.gachaTimer = 0;
@@ -474,6 +513,7 @@ class Game {
                 if (key==='i') {this.state='inventory';this._returnToLobby=true;this.invTab=0;this.invCursor=0;return;}
                 if (key==='c') {this.state='craft';this.craftCursor=0;this.craftTab=0;this._returnToLobby=true;return;}
                 if (key==='p') {this.state='skillTree';this._returnToLobby=true;this.skillTreeCursor={branch:'common',idx:0};return;}
+                if (key==='m') { this.startRoguelike(); return; }
                 return;
             }
             if (this.state==='result') { if (key==='r'||key==='enter') this._returnToLobbyWithSave(); return; }
@@ -526,6 +566,18 @@ class Game {
                     else if (key==='arrowdown'||key==='s') this.upgradeCursor=Math.min(items.length-1,this.upgradeCursor+1);
                     else if (key==='enter'||key==='z') this.executeUpgrade(items);
                 }
+                return;
+            }
+            // ローグライクカード選択
+            if (this.state==='rogueCard') {
+                if (key==='arrowup'||key==='w') this.rogueCardCursor=Math.max(0,this.rogueCardCursor-1);
+                else if (key==='arrowdown'||key==='s') this.rogueCardCursor=Math.min(this.rogueCardChoices.length-1,this.rogueCardCursor+1);
+                else if (key==='z'||key==='enter') this.selectRogueCard();
+                return;
+            }
+            // ローグライクゲームオーバー
+            if (this.state==='rogueOver') {
+                if (key==='r'||key==='enter') this.state='lobby';
                 return;
             }
             // スキルツリー画面
@@ -619,6 +671,144 @@ class Game {
         }
         if (success) { this.craftMessage = `Upgraded to ${item.getDisplayName ? item.getDisplayName() : item.name}+${item.upgradeLevel}!`; this.craftMessageTimer = 2000; Sound.playLevelUp(); }
         else { this.craftMessage = 'Not enough materials!'; this.craftMessageTimer = 1500; }
+    }
+
+    // ========================================
+    // ローグライクモード
+    // ========================================
+    startRoguelike() {
+        this.rogueActive = true;
+        this.rogueFloor = 0;
+        this.rogueKills = 0;
+        this.rogueCards = [];
+        this._rogueAtkMult = 1.0;
+        this._rogueExplode = false;
+        this._rogueDual = false;
+        this._rogueVampire = false;
+        this._rogueRage = false;
+        this._rogueChain = false;
+        // リセットされたプレイヤー
+        const rogueInv = new Inventory();
+        this.player = new Player(WORLD_W/2, WORLD_H/2+200, rogueInv);
+        this.activeCompanion = null;
+        this.nextRogueFloor();
+    }
+
+    nextRogueFloor() {
+        this.rogueFloor++;
+        this.droppedItems=[]; this.arrows=[]; this.particles=[]; this.iceBreaths=[]; this.damageNumbers=[];
+        this.rogueFloorClearTimer = 0;
+        // ランダムマップ生成（草テクスチャ再生成）
+        this.generateGrassTexture();
+
+        const isBossFloor = this.rogueFloor % 5 === 0;
+        const scaleMult = Math.pow(1.15, this.rogueFloor - 1);
+
+        if (isBossFloor) {
+            // ボスフロア
+            const bossData = ROGUE_BOSS_CONFIGS[this.rogueFloor] || ROGUE_BOSS_CONFIGS[10];
+            if (this.rogueFloor >= 15) {
+                // 15F以降: ランダムボス×2
+                this.monsters = [];
+                for (let i = 0; i < 2; i++) {
+                    const bd = bossData[0] || ROGUE_BOSS_CONFIGS[5][0];
+                    const cfg = { ...bd.config };
+                    cfg.hp = Math.floor(cfg.hp * scaleMult);
+                    cfg.attackDamage = Math.floor(cfg.attackDamage * scaleMult);
+                    this.monsters.push(new Monster(bd.name, 800+i*600, 700+i*200, cfg));
+                }
+            } else {
+                this.monsters = bossData.map((bd,i) => {
+                    const cfg = { ...bd.config };
+                    cfg.hp = Math.floor(cfg.hp * scaleMult);
+                    cfg.attackDamage = Math.floor(cfg.attackDamage * scaleMult);
+                    return new Monster(bd.name, 1100+i*300, 700, cfg);
+                });
+            }
+        } else {
+            // 通常フロア: 3〜5体
+            const count = 3 + Math.floor(Math.random() * 3);
+            this.monsters = [];
+            for (let i = 0; i < count; i++) {
+                const typeName = ROGUE_FLOOR_MONSTERS[Math.floor(Math.random() * ROGUE_FLOOR_MONSTERS.length)];
+                const isWolf = typeName === 'Ice Wolf';
+                const cfg = {
+                    hp: Math.floor((isWolf ? 450 : 700) * scaleMult),
+                    width: isWolf ? 78 : 96, height: isWolf ? 78 : 96,
+                    speed: Math.floor((isWolf ? 156 : 96) * scaleMult * 0.3 + (isWolf ? 156 : 96) * 0.7),
+                    color: isWolf ? '#88ccee' : '#cc3333',
+                    attackDamage: Math.floor((isWolf ? 12 : 10) * scaleMult),
+                    attackRange: isWolf ? 60 : 70,
+                    attackCooldown: isWolf ? 1200 : 1200,
+                    aggroRange: 400,
+                    dropTableId: isWolf ? 'iceWolf' : 'forestDrake',
+                    isIceWolf: isWolf,
+                };
+                const mx = 600 + Math.random() * 1200;
+                const my = 500 + Math.random() * 800;
+                this.monsters.push(new Monster(typeName, mx, my, cfg));
+            }
+        }
+
+        this.rogueEnemiesLeft = this.monsters.length;
+        // プレイヤーを中央に
+        this.player.x = WORLD_W/2 - 16;
+        this.player.y = WORLD_H/2 + 200;
+        this.player.hp = Math.min(this.player.hp + 20, this.player.maxHp); // 少し回復
+        this.state = 'playing';
+    }
+
+    onRogueMonsterDefeated(monster) {
+        this.rogueKills++;
+        this.rogueEnemiesLeft--;
+        this.droppedItems.push(...monster.generateDrops());
+
+        // 連鎖カード: 周囲50ダメ
+        if (this._rogueChain) {
+            const cx = monster.x+monster.width/2, cy = monster.y+monster.height/2;
+            for (const m of this.monsters) {
+                if (!m.alive) continue;
+                const d = Math.sqrt((m.x+m.width/2-cx)**2+(m.y+m.height/2-cy)**2);
+                if (d < 100) { m.takeDamage(50); this.damageNumbers.push(new DamageNumber(m.x+m.width/2,m.y-10,50,'#ff8844','CHAIN')); }
+            }
+        }
+
+        // フロアクリアチェック
+        if (this.monsters.every(m => !m.alive)) {
+            this.rogueFloorClearTimer = 2000;
+            Sound.playQuestComplete();
+            // ハイスコア更新
+            if (this.rogueFloor > this.rogueBestFloor) {
+                this.rogueBestFloor = this.rogueFloor;
+                try { localStorage.setItem('mh2d_rogueBest', String(this.rogueBestFloor)); } catch(e){}
+            }
+            // カード選択画面へ（ボスフロアは追加1枚）
+            const cardCount = 3;
+            const shuffled = [...ROGUE_CARDS].sort(() => Math.random()-0.5);
+            this.rogueCardChoices = shuffled.slice(0, cardCount);
+            this.rogueCardCursor = 0;
+            setTimeout(() => { this.state = 'rogueCard'; }, 1500);
+        }
+    }
+
+    selectRogueCard() {
+        const card = this.rogueCardChoices[this.rogueCardCursor];
+        if (card) {
+            card.apply(this.player, this);
+            this.rogueCards.push(card);
+            Sound.playLevelUp();
+        }
+        this.nextRogueFloor();
+    }
+
+    rogueGameOver() {
+        this.rogueActive = false;
+        if (this.rogueFloor > this.rogueBestFloor) {
+            this.rogueBestFloor = this.rogueFloor;
+            try { localStorage.setItem('mh2d_rogueBest', String(this.rogueBestFloor)); } catch(e){}
+        }
+        Sound.playQuestFailed();
+        this.state = 'rogueOver';
     }
 
     learnTreeSkill() {
@@ -858,6 +1048,10 @@ class Game {
         console.log(`Hit zone: ${hitZone} (${spotLabel || 'normal'}) x${spotMult}`);
         dmg = Math.floor(dmg * partDmgMult * spotMult);
         const { partBroken } = monster.takeDamage(dmg, (dx/dist)*kb*comboMult, (dy/dist)*kb*comboMult, hx, hy);
+        // ローグライク: 吸血
+        if (this._rogueVampire) this.player.hp = Math.min(this.player.maxHp, this.player.hp + 3);
+        // ローグライク: 怒り
+        if (this._rogueRage && this.player.hp < this.player.maxHp * 0.5) dmg = Math.floor(dmg * 1.5);
         // 必殺技ゲージ加算
         this.player.addUltGauge(this.player.hasSkill('sw_king') ? 15 : 10);
         // Frost Blade: 凍結カウンター
@@ -933,6 +1127,11 @@ class Game {
             for (const d of drops) d.count += this.player.skillExtraDrop;
         }
         this.droppedItems.push(...drops);
+        // ローグライクモードの場合は専用処理
+        if (this.rogueActive) {
+            this.onRogueMonsterDefeated(monster);
+            return;
+        }
         // フラグメントレアドロップ（1%）
         const fragId = FRAGMENT_DROPS[monster.name];
         if (fragId && Math.random() < 0.01) {
@@ -1050,6 +1249,7 @@ class Game {
         if (this.slowMoTimer>0) { this.slowMoTimer-=dt*1000; dt *= 0.3; } // スローモーション
         if (this.ultimateDisplayTimer>0) this.ultimateDisplayTimer-=dt*1000;
         if (this.craftAnimTimer>0) { this.craftAnimTimer-=dt*1000; if (this.craftAnimTimer<=0) this.craftAnimActive=false; }
+        if (this.rogueFloorClearTimer>0) this.rogueFloorClearTimer-=dt*1000;
         if (this.gachaTimer>0) { this.gachaTimer-=dt*1000; if (this.gachaTimer<=0) this.gachaActive=false; }
 
         // ダメージ数値更新
@@ -1208,6 +1408,7 @@ class Game {
         this.droppedItems=this.droppedItems.filter(i=>!i.isFullyDone());
 
         if (this.player.hp<=0) {
+            if (this.rogueActive) { this.rogueGameOver(); return; }
             this.questSuccess=false; Sound.playQuestFailed();
             this.resultTimer=this.resultDuration; this.resultAnimTimer=0;
             this.state='gameover';
@@ -1240,6 +1441,8 @@ class Game {
             case 'skillTree':
                 if (this._returnToLobby) this.drawLobby(ctx); else this.drawField(ctx);
                 this.drawSkillTree(ctx); break;
+            case 'rogueCard': this.drawField(ctx); this.drawRogueCardSelect(ctx); break;
+            case 'rogueOver': this.drawField(ctx); this.drawRogueOver(ctx); break;
             case 'bossIntro': this.drawBossIntro(ctx); break;
             case 'gameover': this.drawField(ctx); this.drawGameOver(ctx); break;
             case 'result': this.drawField(ctx); this.drawQuestComplete(ctx); break;
@@ -1539,8 +1742,20 @@ class Game {
             ctx.fillStyle='#8888ff';ctx.font='bold 12px monospace';ctx.textAlign='left';
             ctx.fillText('BLOCKING',pBarX,pBarY+75);
         }
+        // ローグライクフロア表示
+        if (this.rogueActive) {
+            ctx.save();
+            ctx.fillStyle='#c8a800'; ctx.font='bold 16px monospace'; ctx.textAlign='center';
+            ctx.fillText(`Floor ${this.rogueFloor}  |  Enemies: ${this.rogueEnemiesLeft}`, this.W/2, 18);
+            if (this.rogueFloorClearTimer > 0) {
+                ctx.globalAlpha = Math.min(1, this.rogueFloorClearTimer/500);
+                ctx.fillStyle='#44ff44'; ctx.font='bold 28px monospace';
+                ctx.fillText('FLOOR CLEAR!', this.W/2, this.H/2 - 30);
+            }
+            ctx.restore();
+        }
         // クエストタイマー（上部中央）
-        if (this.timeAttackMode || this.questTimeLimit > 0) {
+        if (!this.rogueActive && (this.timeAttackMode || this.questTimeLimit > 0)) {
             ctx.fillStyle='#fff'; ctx.font='bold 18px monospace'; ctx.textAlign='center';
             const t = this.questTimeLimit > 0 ? Math.max(0, this.questTimeLimit - this.questTimer) : this.questTimer;
             const m = Math.floor(t/60), s = Math.floor(t%60), ms = Math.floor((t%1)*100);
@@ -1897,6 +2112,65 @@ class Game {
         ctx.restore();
     }
 
+    // ========================================
+    // ローグライクカード選択画面
+    // ========================================
+    drawRogueCardSelect(ctx) {
+        ctx.save(); ctx.globalAlpha = 1;
+        ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(0, 0, this.W, this.H);
+        ctx.fillStyle = '#c8a800'; ctx.font = 'bold 28px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(`Floor ${this.rogueFloor} Clear!`, this.W/2, 80);
+        ctx.fillStyle = '#fff'; ctx.font = '16px monospace';
+        ctx.fillText('Choose an upgrade', this.W/2, 110);
+        const cardW = 280, cardH = 100;
+        for (let i = 0; i < this.rogueCardChoices.length; i++) {
+            const card = this.rogueCardChoices[i];
+            const sel = i === this.rogueCardCursor;
+            const cx = this.W/2 - cardW/2, cy = 140 + i * (cardH + 15);
+            ctx.fillStyle = sel ? 'rgba(200,168,0,0.15)' : '#111122';
+            roundRect(ctx, cx, cy, cardW, cardH, 8); ctx.fill();
+            ctx.strokeStyle = sel ? '#c8a800' : '#444'; ctx.lineWidth = sel ? 2 : 1;
+            roundRect(ctx, cx, cy, cardW, cardH, 8); ctx.stroke();
+            if (sel) { ctx.fillStyle = '#c8a800'; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'left'; ctx.fillText('>', cx+10, cy+40); }
+            ctx.fillStyle = sel ? '#c8a800' : '#ccc'; ctx.font = 'bold 18px monospace'; ctx.textAlign = 'left';
+            ctx.fillText(card.name, cx+30, cy+35);
+            ctx.fillStyle = '#999'; ctx.font = '13px monospace';
+            ctx.fillText(card.desc, cx+30, cy+60);
+        }
+        ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = '13px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('W/S: Select  Z: Choose', this.W/2, this.H-30);
+        ctx.restore();
+    }
+
+    // ========================================
+    // ローグライクゲームオーバー画面
+    // ========================================
+    drawRogueOver(ctx) {
+        ctx.save(); ctx.globalAlpha = 1;
+        ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillRect(0, 0, this.W, this.H);
+        const cx = this.W/2, cy = this.H/2;
+        ctx.fillStyle = '#ff4444'; ctx.font = 'bold 36px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('GAME OVER', cx, cy-80);
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 20px monospace';
+        ctx.fillText(`Reached Floor ${this.rogueFloor}`, cx, cy-40);
+        ctx.fillStyle = '#aaa'; ctx.font = '16px monospace';
+        ctx.fillText(`Total Kills: ${this.rogueKills}`, cx, cy-10);
+        ctx.fillText(`Upgrades: ${this.rogueCards.length}`, cx, cy+15);
+        ctx.fillStyle = '#c8a800'; ctx.font = 'bold 16px monospace';
+        ctx.fillText(`BEST: Floor ${this.rogueBestFloor}`, cx, cy+50);
+        // 取得カード一覧
+        if (this.rogueCards.length > 0) {
+            ctx.fillStyle = '#888'; ctx.font = '12px monospace';
+            let cy2 = cy + 80;
+            for (const c of this.rogueCards) {
+                ctx.fillText(c.name, cx, cy2); cy2 += 18;
+            }
+        }
+        ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = '16px monospace';
+        ctx.fillText('R: Return to Lobby', cx, this.H-40);
+        ctx.restore();
+    }
+
     drawBossIntro(ctx) {
         ctx.save(); ctx.globalAlpha = 1;
         ctx.fillStyle = '#000'; ctx.fillRect(0,0,this.W,this.H);
@@ -2202,7 +2476,12 @@ class Game {
         // === 操作ガイド（最下部固定） ===
         ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '11px monospace'; ctx.textAlign = 'center';
         const taLabel = this.timeAttackMode ? ' [TA:ON]' : '';
-        ctx.fillText(`W/S:Select  Z:Start  T:TimeAtk${taLabel}  I:Inv  C:Craft  P:Skill Tree`, this.W/2+100, this.H-8);
+        ctx.fillText(`W/S:Select  Z:Start  T:TimeAtk${taLabel}  M:Roguelike  I:Inv  C:Craft  P:Skills`, this.W/2+100, this.H-8);
+        // ローグライクハイスコア表示
+        if (this.rogueBestFloor > 0) {
+            ctx.fillStyle = '#c8a800'; ctx.font = '10px monospace'; ctx.textAlign = 'right';
+            ctx.fillText(`Roguelike Best: Floor ${this.rogueBestFloor}`, this.W-15, this.H-22);
+        }
         ctx.restore();
     }
     getDifficultyStars(l) { let s='';for(let i=0;i<3;i++)s+=i<l?'\u2605':'\u2606';return s; }
