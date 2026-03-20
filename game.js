@@ -479,9 +479,22 @@ class Game {
             // インベントリ内操作
             if (this.state==='inventory') {
                 if (key==='arrowleft'||key==='a') { this.invTab=Math.max(0,this.invTab-1); this.invCursor=0; }
-                else if (key==='arrowright'||key==='d') { this.invTab=Math.min(3,this.invTab+1); this.invCursor=0; }
+                else if (key==='arrowright'||key==='d') { this.invTab=Math.min(4,this.invTab+1); this.invCursor=0; }
                 else if (key==='arrowup'||key==='w') this.invCursor=Math.max(0,this.invCursor-1);
                 else if (key==='arrowdown'||key==='s') this.invCursor++;
+                else if ((key==='z'||key==='enter') && this.invTab===4) {
+                    // 仲間の出撃/待機切替
+                    const comps = this.inventory.companions;
+                    if (comps[this.invCursor]) {
+                        const c = comps[this.invCursor];
+                        if (c === this.inventory.activeCompanion) {
+                            this.inventory.activeCompanion = null;
+                            this.activeCompanion = null;
+                        } else {
+                            this.inventory.activeCompanion = c;
+                        }
+                    }
+                }
                 return;
             }
             if (this.state==='craft') {
@@ -875,6 +888,15 @@ class Game {
         if (this.totalHunts >= 1 && !this.inventory.title) this.inventory.title = 'Novice Hunter';
         if (this.totalHunts >= 10 && this.inventory.title === 'Novice Hunter') this.inventory.title = 'Hunter';
         if (monster.name === 'Giant Drake' && this.inventory.title !== 'Dragon Slayer') this.inventory.title = 'Drake Slayer';
+        // 仲間EXP獲得（プレイヤーの半分）
+        if (this.activeCompanion && this.activeCompanion.alive) {
+            const cExpAmount = Math.floor((MONSTER_EXP[monster.name] || 50) / 2);
+            const cLeveled = this.activeCompanion.addExp(cExpAmount);
+            if (cLeveled) {
+                this.damageNumbers.push(new DamageNumber(this.activeCompanion.x, this.activeCompanion.y-20, 0, '#ffcc00', 'LEVEL UP!'));
+                for (let i=0;i<8;i++) { const a=Math.random()*Math.PI*2; this.particles.push(new Particle(this.activeCompanion.x+14, this.activeCompanion.y+14, Math.cos(a)*50, Math.sin(a)*50-30, '#ffcc00', 400, 2)); }
+            }
+        }
         // EXP獲得
         const expAmount = MONSTER_EXP[monster.name] || 50;
         const leveled = this.player.addExp(expAmount);
@@ -1023,8 +1045,24 @@ class Game {
             const hitResult = this.activeCompanion.update(dt, this.player, this.monsters);
             if (hitResult && hitResult.hit) {
                 this.damageNumbers.push(new DamageNumber(hitResult.target.x+hitResult.target.width/2, hitResult.target.y-10, hitResult.dmg, '#aaffaa', ''));
-                this.spawnHitParticles(hitResult.target.x+hitResult.target.width/2, hitResult.target.y+hitResult.target.height/2, 4, false);
+                // 控えめな火花
+                for (let i=0;i<3;i++) { const a=Math.random()*Math.PI*2; this.particles.push(new Particle(hitResult.target.x+hitResult.target.width/2,hitResult.target.y+hitResult.target.height/2,Math.cos(a)*40,Math.sin(a)*40-20,'#aaffaa',200,2)); }
+                Sound.playHit();
                 if (!hitResult.target.alive) { Sound.playMonsterDie(); this.onMonsterDefeated(hitResult.target); }
+            }
+            // モンスターから仲間への攻撃判定
+            for (const m of this.monsters) {
+                if (!m.alive || m.state !== 'attack') continue;
+                const dx = (m.x+m.width/2) - (this.activeCompanion.x+14);
+                const dy = (m.y+m.height/2) - (this.activeCompanion.y+14);
+                if (Math.sqrt(dx*dx+dy*dy) < m.attackRange + 20) {
+                    if (m.attackTimer > m.attackCooldown * 0.95) {
+                        this.activeCompanion.takeDamage(Math.floor(m.attackDamage * 0.5));
+                        if (!this.activeCompanion.alive) {
+                            this.damageNumbers.push(new DamageNumber(this.activeCompanion.x, this.activeCompanion.y-20, 0, '#ff4444', `${this.activeCompanion.name}が倒れた...`));
+                        }
+                    }
+                }
             }
         }
         // カメラ追従
@@ -1498,6 +1536,34 @@ class Game {
         }
         ctx.fillStyle='rgba(255,255,255,0.5)';ctx.font='12px monospace';ctx.textAlign='center';
         ctx.fillText('WASD:Move  Z:Atk  X:Block  Shift:Dodge  R:Ultimate  Q:Switch',this.W/2,this.H-10);
+        // 仲間ステータスパネル（左下）
+        if (this.activeCompanion && this.activeCompanion.alive) {
+            const c = this.activeCompanion;
+            const cpX = 15, cpY = this.H - 70;
+            ctx.fillStyle = 'rgba(10,10,20,0.7)';
+            roundRect(ctx, cpX, cpY, 160, 55, 6); ctx.fill();
+            ctx.strokeStyle = '#444'; ctx.lineWidth = 1;
+            roundRect(ctx, cpX, cpY, 160, 55, 6); ctx.stroke();
+            // アイコン
+            ctx.fillStyle = c.color;
+            ctx.beginPath(); ctx.arc(cpX+18, cpY+18, 10, 0, Math.PI*2); ctx.fill();
+            // 名前・レベル
+            ctx.fillStyle = '#fff'; ctx.font = '11px monospace'; ctx.textAlign = 'left';
+            ctx.fillText(`Lv.${c.level} ${c.name}`, cpX+32, cpY+16);
+            // HPバー
+            const hpR = c.hp / c.maxHp;
+            ctx.fillStyle = '#222'; roundRect(ctx, cpX+32, cpY+22, 115, 8, 3); ctx.fill();
+            ctx.save(); roundRect(ctx, cpX+32, cpY+22, 115, 8, 3); ctx.clip();
+            ctx.fillStyle = hpR > 0.3 ? '#44cc44' : '#cc4444';
+            ctx.fillRect(cpX+32, cpY+22, 115*hpR, 8);
+            ctx.restore();
+            ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
+            ctx.fillText(`${c.hp}/${c.maxHp}`, cpX+32, cpY+42);
+            // EXPバー
+            const expR = c.exp / c.expToNext;
+            ctx.fillStyle = '#111'; ctx.fillRect(cpX+32, cpY+44, 115, 4);
+            ctx.fillStyle = '#4488cc'; ctx.fillRect(cpX+32, cpY+44, 115*expR, 4);
+        }
         // ミニマップ描画
         this.drawMinimap(ctx);
     }
@@ -1965,8 +2031,8 @@ class Game {
         ctx.fillText('INVENTORY', W/2, 43);
 
         // === タブ ===
-        const tabNames = ['Weapons', 'Armor', 'Materials', 'Items'];
-        const tabW = Math.min(140, (W-60)/4);
+        const tabNames = ['Weapons', 'Armor', 'Materials', 'Items', 'Companions'];
+        const tabW = Math.min(120, (W-80)/5);
         const tabStartX = 20;
         const tabY = 62;
         for (let t = 0; t < 4; t++) {
@@ -2094,15 +2160,78 @@ class Game {
                 const [selId, selMat] = matEntries[this.invCursor];
                 this._drawInvDetail(ctx, detailX, contentY, W - detailX - 15, contentH, 'material', selMat);
             }
+        } else if (this.invTab === 4) {
+            // 仲間タブ
+            const comps = this.inventory.companions;
+            this.invCursor = Math.min(this.invCursor, Math.max(0, comps.length-1));
+            if (comps.length === 0) {
+                ctx.fillStyle = '#555'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
+                ctx.fillText('No companions yet', W/3, contentY+40);
+                ctx.fillStyle = '#666'; ctx.font = '11px monospace';
+                ctx.fillText('Defeat monsters for fragments, then craft boxes!', W/3, contentY+65);
+            } else {
+                let cy = contentY;
+                for (let i = 0; i < comps.length; i++) {
+                    const c = comps[i];
+                    const sel = i === this.invCursor;
+                    const isActive = c === this.inventory.activeCompanion;
+                    ctx.fillStyle = sel ? 'rgba(200,168,0,0.12)' : (i%2===0 ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0)');
+                    ctx.fillRect(20, cy, detailX-30, 36);
+                    if (sel) { ctx.strokeStyle = '#c8a800'; ctx.lineWidth = 2; ctx.strokeRect(20, cy, detailX-30, 36); }
+                    // アイコン
+                    ctx.fillStyle = c.color;
+                    ctx.beginPath(); ctx.arc(38, cy+18, 10, 0, Math.PI*2); ctx.fill();
+                    // 出撃マーク
+                    if (isActive) { ctx.fillStyle = '#c8a800'; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'left'; ctx.fillText('\u25b6', 52, cy+22); }
+                    // 名前
+                    ctx.fillStyle = isActive ? '#c8a800' : (sel ? '#fff' : '#aaa');
+                    ctx.font = 'bold 12px monospace'; ctx.textAlign = 'left';
+                    ctx.fillText(`Lv.${c.level} ${c.name}`, 66, cy+15);
+                    // ステータス
+                    ctx.fillStyle = '#888'; ctx.font = '10px monospace';
+                    ctx.fillText(`HP:${c.maxHp} ATK:${c.atk}`, 66, cy+30);
+                    // 状態
+                    ctx.fillStyle = isActive ? '#44cc44' : '#666'; ctx.textAlign = 'right';
+                    ctx.fillText(isActive ? '[ACTIVE]' : '[STANDBY]', detailX-15, cy+22);
+                    ctx.textAlign = 'left';
+                    cy += 40;
+                }
+                // 右パネル: 選択中仲間の詳細
+                if (comps[this.invCursor]) {
+                    const c = comps[this.invCursor];
+                    const isActive = c === this.inventory.activeCompanion;
+                    ctx.fillStyle = 'rgba(26,26,34,0.95)';
+                    roundRect(ctx, detailX, contentY, W-detailX-15, H-contentY-40, 8); ctx.fill();
+                    ctx.strokeStyle = '#c8a800'; ctx.lineWidth = 1;
+                    roundRect(ctx, detailX, contentY, W-detailX-15, H-contentY-40, 8); ctx.stroke();
+                    const dcx = detailX + (W-detailX-15)/2;
+                    let dy = contentY + 35;
+                    // 大アイコン
+                    ctx.fillStyle = c.color;
+                    ctx.beginPath(); ctx.arc(dcx, dy, 25, 0, Math.PI*2); ctx.fill();
+                    dy += 40;
+                    ctx.fillStyle = '#c8a800'; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
+                    ctx.fillText(`Lv.${c.level} ${c.name}`, dcx, dy); dy += 22;
+                    ctx.fillStyle = '#bbb'; ctx.font = '12px monospace';
+                    ctx.fillText(`HP: ${c.maxHp}  ATK: ${c.atk}`, dcx, dy); dy += 20;
+                    ctx.fillText(`EXP: ${c.exp}/${c.expToNext}`, dcx, dy); dy += 30;
+                    // 出撃/待機ボタン
+                    const bx = dcx-50, bw = 100, bh = 28;
+                    ctx.fillStyle = '#886600'; roundRect(ctx, bx, dy, bw, bh, 4); ctx.fill();
+                    ctx.strokeStyle = '#c8a800'; ctx.lineWidth = 1; roundRect(ctx, bx, dy, bw, bh, 4); ctx.stroke();
+                    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px monospace';
+                    ctx.fillText(isActive ? 'RECALL' : 'DEPLOY', dcx, dy+18);
+                }
+            }
         } else {
-            // アイテムタブ（将来用）
+            // アイテムタブ
             ctx.fillStyle = '#555'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
             ctx.fillText('No items yet', W/3, contentY + 40);
         }
 
         // 操作ガイド
         ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '12px monospace'; ctx.textAlign = 'center';
-        ctx.fillText('A/D:Tab  W/S:Select  I:Close', W/2, H - 18);
+        ctx.fillText('A/D:Tab  W/S:Select  Z:Action  I:Close', W/2, H - 18);
         ctx.restore();
     }
 
