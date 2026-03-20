@@ -572,7 +572,7 @@ class Game {
                 }
             }
             if (key==='r') this.tryUltimate();
-            if (key==='p') { this.state='skillTree'; this.skillTreeCursor={branch:'common',idx:0}; }
+            if (key==='p') { this.state='skillTree'; this._returnToLobby=false; this.skillTreeCursor={branch:'common',idx:0}; }
             if (key==='q') { this.player.cycleWeapon(); this.weaponSwitchMessage=`Equipped: ${this.player.weapon.name}`; this.weaponSwitchTimer=1500; }
         });
         window.addEventListener('keyup',(e)=>{
@@ -1771,6 +1771,9 @@ class Game {
     // スキルツリー画面
     // ========================================
     drawSkillTree(ctx) {
+        try { this._drawSkillTreeInner(ctx); } catch(e) { console.error('SkillTree error:', e); ctx.fillStyle='#f00';ctx.fillText('Error: '+e.message,50,50); }
+    }
+    _drawSkillTreeInner(ctx) {
         ctx.save(); ctx.globalAlpha = 1;
         const W = this.W, H = this.H;
         // 金属背景（インベントリと同じ）
