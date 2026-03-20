@@ -40,6 +40,7 @@ class Game {
         this.upgradeCursor = 0;
         // スキルツリー
         this.skillTreeCursor = { branch: 'common', idx: 0 };
+        this.skillPointHintTimer = 0;
         // ガチャ演出
         this.gachaActive = false;
         this.gachaTimer = 0;
@@ -472,6 +473,7 @@ class Game {
                 if (key==='t') { this.timeAttackMode=!this.timeAttackMode; }
                 if (key==='i') {this.state='inventory';this._returnToLobby=true;this.invTab=0;this.invCursor=0;return;}
                 if (key==='c') {this.state='craft';this.craftCursor=0;this.craftTab=0;this._returnToLobby=true;return;}
+                if (key==='p') {this.state='skillTree';this._returnToLobby=true;this.skillTreeCursor={branch:'common',idx:0};return;}
                 return;
             }
             if (this.state==='result') { if (key==='r'||key==='enter') this._returnToLobbyWithSave(); return; }
@@ -538,7 +540,7 @@ class Game {
                     this.skillTreeCursor.idx=Math.min(list.length-1,this.skillTreeCursor.idx+1);
                 }
                 else if (key==='z'||key==='enter') this.learnTreeSkill();
-                else if (key==='p'||key==='escape'||key==='i') this.state='playing';
+                else if (key==='p'||key==='escape') { this.state=this._returnToLobby?'lobby':'playing'; this._returnToLobby=false; }
                 return;
             }
             // スキル選択画面
@@ -903,6 +905,7 @@ class Game {
 
     triggerLevelUp() {
         this.levelUpTimer = 2000;
+        this.skillPointHintTimer = 3000; // SP獲得ヒント3秒
         Sound.playLevelUp();
         // レベルアップパーティクル
         const px = this.player.x + this.player.width/2, py = this.player.y + this.player.height/2;
@@ -1042,6 +1045,7 @@ class Game {
         if (this.weaponSwitchTimer>0) this.weaponSwitchTimer-=dt*1000;
         if (this.shakeTimer>0) this.shakeTimer-=dt*1000;
         if (this.levelUpTimer>0) this.levelUpTimer-=dt*1000;
+        if (this.skillPointHintTimer>0) this.skillPointHintTimer-=dt*1000;
         if (this.saveIndicatorTimer>0) this.saveIndicatorTimer-=dt*1000;
         if (this.slowMoTimer>0) { this.slowMoTimer-=dt*1000; dt *= 0.3; } // スローモーション
         if (this.ultimateDisplayTimer>0) this.ultimateDisplayTimer-=dt*1000;
@@ -1233,7 +1237,9 @@ class Game {
                 if (this._returnToLobby) this.drawLobby(ctx); else this.drawField(ctx);
                 this.drawCraftMenu(ctx); break;
             case 'skillSelect': this.drawField(ctx); this.drawSkillSelect(ctx); break;
-            case 'skillTree': this.drawField(ctx); this.drawSkillTree(ctx); break;
+            case 'skillTree':
+                if (this._returnToLobby) this.drawLobby(ctx); else this.drawField(ctx);
+                this.drawSkillTree(ctx); break;
             case 'bossIntro': this.drawBossIntro(ctx); break;
             case 'gameover': this.drawField(ctx); this.drawGameOver(ctx); break;
             case 'result': this.drawField(ctx); this.drawQuestComplete(ctx); break;
@@ -1391,7 +1397,15 @@ class Game {
             ctx.save();
             ctx.globalAlpha = Math.min(1, this.levelUpTimer / 500);
             ctx.fillStyle = '#ffcc00'; ctx.font = 'bold 32px monospace'; ctx.textAlign = 'center';
-            ctx.fillText(`LEVEL UP! Lv${this.player.level}`, 400, 200);
+            ctx.fillText(`LEVEL UP! Lv${this.player.level}`, this.W/2, 200);
+            ctx.restore();
+        }
+        // SPヒント
+        if (this.skillPointHintTimer > 0 && this.levelUpTimer <= 0) {
+            ctx.save();
+            ctx.globalAlpha = Math.min(1, this.skillPointHintTimer / 500);
+            ctx.fillStyle = '#ffcc00'; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
+            ctx.fillText('スキルポイントを獲得！PキーでSkill Treeを開こう', this.W/2, 220);
             ctx.restore();
         }
         // ボス第2形態 赤ビネット
@@ -2185,7 +2199,7 @@ class Game {
         // === 操作ガイド（最下部固定） ===
         ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '11px monospace'; ctx.textAlign = 'center';
         const taLabel = this.timeAttackMode ? ' [TA:ON]' : '';
-        ctx.fillText(`W/S:Select  Z:Start  T:TimeAtk${taLabel}  I:Inv  C:Craft`, this.W/2+100, this.H-8);
+        ctx.fillText(`W/S:Select  Z:Start  T:TimeAtk${taLabel}  I:Inv  C:Craft  P:Skill Tree`, this.W/2+100, this.H-8);
         ctx.restore();
     }
     getDifficultyStars(l) { let s='';for(let i=0;i<3;i++)s+=i<l?'\u2605':'\u2606';return s; }
