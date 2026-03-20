@@ -2,7 +2,7 @@
 // MONSTER HUNT 2D - Phase 5
 // フィールド改善・エフェクト・コンボ・UI仕上げ
 // ========================================
-import { MATERIALS, UPGRADE_COSTS, UPGRADE_DMG_MULT, ARMOR_UPGRADE_MULT, SUB_QUESTS, EXP_TABLE, MONSTER_EXP, MAX_LEVEL, SKILLS, DROP_TABLES, WORLD_W, WORLD_H, AREAS, TREES, TREE_TRUNK_R, TREE_CANOPY_R, TREE_COLLISION_R, QUESTS, Weapon, WEAPONS, Armor, ARMORS, RECIPES, FRAGMENT_DROPS, BOX_RECIPES, COMPANION_TYPES } from './data.js';
+import { MATERIALS, UPGRADE_COSTS, UPGRADE_DMG_MULT, ARMOR_UPGRADE_MULT, SUB_QUESTS, EXP_TABLE, MONSTER_EXP, MAX_LEVEL, SKILLS, SKILL_TREE, DROP_TABLES, WORLD_W, WORLD_H, AREAS, TREES, TREE_TRUNK_R, TREE_CANOPY_R, TREE_COLLISION_R, QUESTS, Weapon, WEAPONS, Armor, ARMORS, RECIPES, FRAGMENT_DROPS, BOX_RECIPES, COMPANION_TYPES } from './data.js';
 import { SeededRandom, Particle, DamageNumber, SoundManager, Sound, roundRect } from './utils.js';
 import { DroppedItem, Arrow } from './weapon.js';
 import { Inventory } from './inventory.js';
@@ -38,6 +38,8 @@ class Game {
         // クラフト画面タブ
         this.craftTab = 0; // 0=CRAFT, 1=UPGRADE
         this.upgradeCursor = 0;
+        // スキルツリー
+        this.skillTreeCursor = { branch: 'common', idx: 0 };
         // ガチャ演出
         this.gachaActive = false;
         this.gachaTimer = 0;
@@ -260,6 +262,8 @@ class Game {
             this._savedSkillAtkSpdMult = this.player.skillAtkSpdMult;
             this._savedSkillExtraDrop = this.player.skillExtraDrop;
             this._savedSkillShowHpNum = this.player.skillShowHpNum;
+            this._savedTreeSkills = [...this.player.treeSkills];
+            this._savedSkillPoints = this.player.skillPoints;
         }
         this.state = 'lobby';
         this.saveGame();
@@ -283,6 +287,8 @@ class Game {
                 skillAtkSpdMult: this.player ? this.player.skillAtkSpdMult : 1,
                 skillExtraDrop: this.player ? this.player.skillExtraDrop : 0,
                 skillShowHpNum: this.player ? this.player.skillShowHpNum : false,
+                treeSkills: this.player ? [...this.player.treeSkills] : (this._savedTreeSkills || []),
+                skillPoints: this.player ? this.player.skillPoints : (this._savedSkillPoints || 0),
                 totalHunts: this.totalHunts,
             };
             localStorage.setItem('monsterHunt2D_save', JSON.stringify(data));
@@ -310,6 +316,8 @@ class Game {
             this._savedSkillAtkSpdMult = data.skillAtkSpdMult || 1;
             this._savedSkillExtraDrop = data.skillExtraDrop || 0;
             this._savedSkillShowHpNum = data.skillShowHpNum || false;
+            this._savedTreeSkills = data.treeSkills || [];
+            this._savedSkillPoints = data.skillPoints || 0;
             this.totalHunts = data.totalHunts || 0;
             // bestTimesも復元
             this.inventory.bestTimes = data.inventory.bestTimes || {};
@@ -334,6 +342,8 @@ class Game {
         player.skillAtkSpdMult = this._savedSkillAtkSpdMult || 1;
         player.skillExtraDrop = this._savedSkillExtraDrop || 0;
         player.skillShowHpNum = this._savedSkillShowHpNum || false;
+        player.treeSkills = new Set(this._savedTreeSkills || []);
+        player.skillPoints = this._savedSkillPoints || 0;
     }
 
     /** データリセット */
@@ -516,6 +526,21 @@ class Game {
                 }
                 return;
             }
+            // スキルツリー画面
+            if (this.state==='skillTree') {
+                const branches = ['common','swordsman','tank','archer','mage'];
+                const bi = branches.indexOf(this.skillTreeCursor.branch);
+                if (key==='arrowleft'||key==='a') { const ni=Math.max(0,bi-1); this.skillTreeCursor.branch=branches[ni]; this.skillTreeCursor.idx=0; }
+                else if (key==='arrowright'||key==='d') { const ni=Math.min(4,bi+1); this.skillTreeCursor.branch=branches[ni]; this.skillTreeCursor.idx=0; }
+                else if (key==='arrowup'||key==='w') this.skillTreeCursor.idx=Math.max(0,this.skillTreeCursor.idx-1);
+                else if (key==='arrowdown'||key==='s') {
+                    const list=this.skillTreeCursor.branch==='common'?SKILL_TREE.common:SKILL_TREE[this.skillTreeCursor.branch].skills;
+                    this.skillTreeCursor.idx=Math.min(list.length-1,this.skillTreeCursor.idx+1);
+                }
+                else if (key==='z'||key==='enter') this.learnTreeSkill();
+                else if (key==='p'||key==='escape'||key==='i') this.state='playing';
+                return;
+            }
             // スキル選択画面
             if (this.state==='skillSelect') {
                 if (key==='w'||key==='arrowup') this.skillCursor=Math.max(0,this.skillCursor-1);
@@ -545,6 +570,7 @@ class Game {
                 }
             }
             if (key==='r') this.tryUltimate();
+            if (key==='p') { this.state='skillTree'; this.skillTreeCursor={branch:'common',idx:0}; }
             if (key==='q') { this.player.cycleWeapon(); this.weaponSwitchMessage=`Equipped: ${this.player.weapon.name}`; this.weaponSwitchTimer=1500; }
         });
         window.addEventListener('keyup',(e)=>{
@@ -591,6 +617,26 @@ class Game {
         }
         if (success) { this.craftMessage = `Upgraded to ${item.getDisplayName ? item.getDisplayName() : item.name}+${item.upgradeLevel}!`; this.craftMessageTimer = 2000; Sound.playLevelUp(); }
         else { this.craftMessage = 'Not enough materials!'; this.craftMessageTimer = 1500; }
+    }
+
+    learnTreeSkill() {
+        if (!this.player || this.player.skillPoints <= 0) return;
+        const c = this.skillTreeCursor;
+        const list = c.branch === 'common' ? SKILL_TREE.common : SKILL_TREE[c.branch].skills;
+        const skill = list[c.idx];
+        if (!skill || this.player.treeSkills.has(skill.id)) return;
+        // 前提スキルチェック
+        if (skill.requires.length > 0 && !skill.requires.every(r => this.player.treeSkills.has(r))) return;
+        // スキル習得
+        this.player.treeSkills.add(skill.id);
+        this.player.skillPoints--;
+        // 即時効果適用
+        if (skill.id === 'robust') this.player.maxHp += 50;
+        if (skill.id === 'training') this.player.skillMeleeMult *= 1.1;
+        if (skill.id === 'sw_power') this.player.skillMeleeMult *= 1.25;
+        if (skill.id === 'tk_grit' && this.player.hp < this.player.maxHp * 0.3) this.player.skillMeleeMult *= 1.2;
+        Sound.playLevelUp();
+        this.craftMessage = `Learned: ${skill.name}!`; this.craftMessageTimer = 2000;
     }
 
     openBox() {
@@ -650,7 +696,8 @@ class Game {
             for (const m of this.monsters) { if (m.alive) { m.takeDamage(200); this.spawnHitParticles(m.x+m.width/2,m.y+m.height/2,15,true); if (!m.alive) { Sound.playMonsterDie(); this.onMonsterDefeated(m); } } }
         } else if (style === 'bow') {
             // 矢の雨: 10本の矢
-            for (let i=0;i<10;i++) { const ax=px-200+Math.random()*400; this.arrows.push(new Arrow(ax,-50,'down',80)); }
+            const arrowCount = this.player.hasSkill('ar_storm') ? 25 : 10;
+            for (let i=0;i<arrowCount;i++) { const ax=px-200+Math.random()*400; this.arrows.push(new Arrow(ax,-50,'down',80)); }
         } else if (style === 'frost') {
             // 吹雪: 全モンスター凍結+150ダメージ
             for (const m of this.monsters) { if (m.alive) { m.frozenTimer=3000; m.takeDamage(150); this.spawnHitParticles(m.x+m.width/2,m.y+m.height/2,10,true); for(let i=0;i<8;i++){const a=Math.random()*Math.PI*2;this.particles.push(new Particle(m.x+m.width/2,m.y+m.height/2,Math.cos(a)*100,Math.sin(a)*100,'#aaeeff',500,3));} if (!m.alive) { Sound.playMonsterDie(); this.onMonsterDefeated(m); } } }
@@ -674,7 +721,16 @@ class Game {
         if (this.player.weapon.type === 'ranged') {
             this.player.attack();
             const cx=this.player.x+this.player.width/2, cy=this.player.y+this.player.height/2;
-            this.arrows.push(new Arrow(cx,cy,this.player.facing,this.player.weapon.damage+this.player.bonusDamage));
+            const arPierce = this.player.hasSkill('ar_pierce');
+            this.arrows.push(new Arrow(cx,cy,this.player.facing,this.player.weapon.damage+this.player.bonusDamage, arPierce));
+            // 連矢スキル: 2本同時
+            if (this.player.hasSkill('ar_double')) {
+                const spread = 10 * Math.PI/180;
+                const a2 = new Arrow(cx,cy,this.player.facing,this.player.weapon.damage+this.player.bonusDamage, arPierce);
+                const baseAngle = Math.atan2(a2.vy,a2.vx) + spread;
+                a2.vx = Math.cos(baseAngle); a2.vy = Math.sin(baseAngle);
+                this.arrows.push(a2);
+            }
             return;
         }
         const hitbox = this.player.attack(); if (!hitbox) return;
@@ -766,6 +822,12 @@ class Game {
     calcDamage(baseDmg, weapon, comboMult, monster) {
         let dmg = (baseDmg + this.player.bonusDamage) * comboMult;
         if (weapon.type === 'melee') dmg *= this.player.skillMeleeMult;
+        // 武練スキル
+        if (this.player.hasSkill('training')) dmg *= 1.1;
+        // 居合スキル: ダッシュ直後
+        if (this.player.hasSkill('sw_iai') && this.player.dashTimer > 0) dmg *= 1.5;
+        // 属性強化スキル
+        if (this.player.hasSkill('mg_element') && (weapon.style === 'frost' || weapon.style === 'poison')) dmg *= 1.3;
         // 弱点判定（氷属性武器 → 氷弱点モンスター）
         let isWeak = false;
         if (monster.weakness === 'ice' && weapon.style === 'frost') {
@@ -795,12 +857,12 @@ class Game {
         dmg = Math.floor(dmg * partDmgMult * spotMult);
         const { partBroken } = monster.takeDamage(dmg, (dx/dist)*kb*comboMult, (dy/dist)*kb*comboMult, hx, hy);
         // 必殺技ゲージ加算
-        this.player.addUltGauge(10);
+        this.player.addUltGauge(this.player.hasSkill('sw_king') ? 15 : 10);
         // Frost Blade: 凍結カウンター
         if (style === 'frost' && monster.alive && monster.frozenTimer <= 0) {
             monster.frostCount++;
             if (monster.frostCount >= 3) {
-                monster.frozenTimer = 2000; monster.frostCount = 0;
+                monster.frozenTimer = this.player.hasSkill('mg_freeze') ? 5000 : 2000; monster.frostCount = 0;
                 // 氷エフェクト
                 for (let i=0;i<8;i++) { const a=Math.random()*Math.PI*2; this.particles.push(new Particle(hx,hy,Math.cos(a)*80,Math.sin(a)*80,'#aaeeff',400,3)); }
             }
@@ -1171,6 +1233,7 @@ class Game {
                 if (this._returnToLobby) this.drawLobby(ctx); else this.drawField(ctx);
                 this.drawCraftMenu(ctx); break;
             case 'skillSelect': this.drawField(ctx); this.drawSkillSelect(ctx); break;
+            case 'skillTree': this.drawField(ctx); this.drawSkillTree(ctx); break;
             case 'bossIntro': this.drawBossIntro(ctx); break;
             case 'gameover': this.drawField(ctx); this.drawGameOver(ctx); break;
             case 'result': this.drawField(ctx); this.drawQuestComplete(ctx); break;
@@ -1535,7 +1598,7 @@ class Game {
             ctx.fillText(this.weaponSwitchMessage,400,400);
         }
         ctx.fillStyle='rgba(255,255,255,0.5)';ctx.font='12px monospace';ctx.textAlign='center';
-        ctx.fillText('WASD:Move  Z:Atk  X:Block  Shift:Dodge  R:Ultimate  Q:Switch',this.W/2,this.H-10);
+        ctx.fillText('WASD:Move  Z:Atk  X:Block  Shift:Dodge  R:Ult  Q:Switch  P:Skills',this.W/2,this.H-10);
         // 仲間ステータスパネル（左下）
         if (this.activeCompanion && this.activeCompanion.alive) {
             const c = this.activeCompanion;
@@ -1690,6 +1753,133 @@ class Game {
     // ========================================
     // ボス登場演出
     // ========================================
+    // ========================================
+    // スキルツリー画面
+    // ========================================
+    drawSkillTree(ctx) {
+        ctx.save(); ctx.globalAlpha = 1;
+        const W = this.W, H = this.H;
+        // 金属背景（インベントリと同じ）
+        ctx.fillStyle = '#1a1a22'; ctx.fillRect(0, 0, W, H);
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
+        for (let x=0;x<W;x+=20){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+        for (let y=0;y<H;y+=20){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+        ctx.strokeStyle='#c8a800';ctx.lineWidth=3;ctx.strokeRect(5,5,W-10,H-10);
+        for (const [rx,ry] of [[10,10],[W-10,10],[10,H-10],[W-10,H-10]]){
+            ctx.fillStyle='#c8a800';ctx.beginPath();ctx.arc(rx,ry,5,0,Math.PI*2);ctx.fill();
+        }
+        // タイトル
+        const tg=ctx.createLinearGradient(0,18,0,52);
+        tg.addColorStop(0,'#3a3a44');tg.addColorStop(0.5,'#4a4a55');tg.addColorStop(1,'#2a2a33');
+        ctx.fillStyle=tg;ctx.fillRect(10,18,W-20,36);
+        ctx.fillStyle='#c8a800';ctx.font='bold 22px monospace';ctx.textAlign='center';
+        ctx.fillText('SKILL TREE',W/2,43);
+        // スキルポイント
+        const sp = this.player ? this.player.skillPoints : 0;
+        ctx.fillStyle=sp>0?'#ffcc00':'#888';ctx.font='bold 14px monospace';ctx.textAlign='right';
+        ctx.fillText(`SP: ${sp}`,W-20,43);
+
+        const branches = ['common','swordsman','tank','archer','mage'];
+        const branchNames = ['Common','Swordsman','Tank','Archer','Mage'];
+        const branchColors = ['#c8a800','#cc4444','#4488cc','#44aa44','#aa44cc'];
+        const colW = Math.floor((W-40)/5);
+        const startY = 70;
+        const nodeR = 18;
+        const nodeGap = 65;
+
+        for (let bi=0; bi<branches.length; bi++) {
+            const bKey = branches[bi];
+            const bColor = branchColors[bi];
+            const cx = 20 + bi*colW + colW/2;
+            // 系統名
+            ctx.fillStyle = bColor; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
+            ctx.fillText(branchNames[bi], cx, startY);
+            const list = bKey === 'common' ? SKILL_TREE.common : SKILL_TREE[bKey].skills;
+            for (let si=0; si<list.length; si++) {
+                const skill = list[si];
+                const ny = startY + 20 + si * nodeGap;
+                const has = this.player && this.player.treeSkills.has(skill.id);
+                const canLearn = !has && sp > 0 && (skill.requires.length === 0 || skill.requires.every(r => this.player && this.player.treeSkills.has(r)));
+                const isSel = this.skillTreeCursor.branch === bKey && this.skillTreeCursor.idx === si;
+                // 接続線
+                if (si > 0) {
+                    const prevHas = this.player && this.player.treeSkills.has(list[si-1].id);
+                    ctx.strokeStyle = prevHas ? bColor : '#333'; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.moveTo(cx, ny-nodeGap+nodeR+5); ctx.lineTo(cx, ny-nodeR-5); ctx.stroke();
+                }
+                // ノード（六角形）
+                ctx.save();
+                ctx.beginPath();
+                for (let h=0;h<6;h++){const a=h*Math.PI/3-Math.PI/2;ctx.lineTo(cx+Math.cos(a)*nodeR,ny+Math.sin(a)*nodeR);}
+                ctx.closePath();
+                if (has) { ctx.fillStyle = bColor; }
+                else if (canLearn) { ctx.fillStyle = '#3a3a44'; }
+                else { ctx.fillStyle = '#222233'; }
+                ctx.fill();
+                ctx.strokeStyle = isSel ? '#fff' : (has ? bColor : '#444');
+                ctx.lineWidth = isSel ? 3 : 1;
+                ctx.stroke();
+                // 選択時光
+                if (isSel && canLearn) {
+                    ctx.globalAlpha = 0.15 + Math.sin(Date.now()*0.005)*0.1;
+                    ctx.fillStyle = '#fff';
+                    ctx.beginPath();
+                    for (let h=0;h<6;h++){const a=h*Math.PI/3-Math.PI/2;ctx.lineTo(cx+Math.cos(a)*(nodeR+3),ny+Math.sin(a)*(nodeR+3));}
+                    ctx.closePath(); ctx.fill();
+                    ctx.globalAlpha = 1;
+                }
+                ctx.restore();
+                // スキル名
+                ctx.fillStyle = has ? '#fff' : (canLearn ? '#ccc' : '#555');
+                ctx.font = '9px monospace'; ctx.textAlign = 'center';
+                ctx.fillText(skill.name, cx, ny+nodeR+14);
+            }
+        }
+
+        // 右パネル: 選択中スキル詳細
+        const c = this.skillTreeCursor;
+        const selList = c.branch === 'common' ? SKILL_TREE.common : SKILL_TREE[c.branch].skills;
+        const selSkill = selList[c.idx];
+        if (selSkill) {
+            const dpX = W - 220, dpY = startY + 20, dpW = 200, dpH = 200;
+            ctx.fillStyle = 'rgba(26,26,34,0.95)';
+            roundRect(ctx, dpX, dpY, dpW, dpH, 8); ctx.fill();
+            ctx.strokeStyle = '#c8a800'; ctx.lineWidth = 1;
+            roundRect(ctx, dpX, dpY, dpW, dpH, 8); ctx.stroke();
+            const dcx = dpX + dpW/2;
+            let dy = dpY + 25;
+            ctx.fillStyle = '#c8a800'; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
+            ctx.fillText(selSkill.name, dcx, dy); dy += 25;
+            ctx.fillStyle = '#bbb'; ctx.font = '11px monospace';
+            // ワードラップ
+            const words = selSkill.desc.split('');
+            let line = '';
+            for (const ch of words) {
+                if (ctx.measureText(line+ch).width > dpW-20) { ctx.fillText(line, dcx, dy); dy+=16; line=''; }
+                line += ch;
+            }
+            if (line) { ctx.fillText(line, dcx, dy); dy+=20; }
+            dy += 10;
+            const has = this.player && this.player.treeSkills.has(selSkill.id);
+            const canLearn = !has && sp > 0 && (selSkill.requires.length === 0 || selSkill.requires.every(r => this.player && this.player.treeSkills.has(r)));
+            if (has) {
+                ctx.fillStyle = '#44cc44'; ctx.font = 'bold 12px monospace';
+                ctx.fillText('LEARNED', dcx, dy);
+            } else if (canLearn) {
+                ctx.fillStyle = '#c8a800'; ctx.font = 'bold 12px monospace';
+                ctx.fillText('[Z] LEARN (1 SP)', dcx, dy);
+            } else {
+                ctx.fillStyle = '#666'; ctx.font = '11px monospace';
+                if (selSkill.requires.length > 0) ctx.fillText(`Requires: ${selSkill.requires.join(', ')}`, dcx, dy);
+                else ctx.fillText('Need SP', dcx, dy);
+            }
+        }
+
+        ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '12px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('A/D:Branch  W/S:Select  Z:Learn  P:Close', W/2, H-18);
+        ctx.restore();
+    }
+
     drawBossIntro(ctx) {
         ctx.save(); ctx.globalAlpha = 1;
         ctx.fillStyle = '#000'; ctx.fillRect(0,0,this.W,this.H);

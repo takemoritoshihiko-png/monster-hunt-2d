@@ -56,7 +56,10 @@ export class Player {
         this.skillAtkSpdMult = 1.0;  // 攻撃速度倍率
         this.skillExtraDrop = 0;     // 追加ドロップ数
         this.skillShowHpNum = false; // モンスターHP数値表示
-        this.acquiredSkills = [];    // 取得済みスキルID
+        this.acquiredSkills = [];    // 取得済みスキルID（旧・互換用）
+        // スキルツリー
+        this.skillPoints = 0;        // 未使用スキルポイント
+        this.treeSkills = new Set(); // 取得済みスキルツリーID
     }
     getExpToNext() {
         if (this.level >= MAX_LEVEL) return Infinity;
@@ -73,7 +76,8 @@ export class Player {
             this.bonusDamage += 5;
             this.baseSpeed += 5;
             this.speed = this.baseSpeed;
-            return true; // レベルアップした
+            this.skillPoints++;
+            return true;
         }
         return false;
     }
@@ -163,8 +167,12 @@ export class Player {
         // 必殺技タイマー
         if (this.ultimateTimer > 0) this.ultimateTimer -= dt * 1000;
         if (this.ultimateTimer <= 0) this.ultimateActive = false;
+        // 魔力充填: ゲージ自動回復
+        if (this.hasSkill('mg_charge')) this.ultimateGauge = Math.min(100, this.ultimateGauge + 2 * dt);
         this.equipBestArmor();
     }
+    /** スキルツリーのスキルを持っているか */
+    hasSkill(id) { return this.treeSkills.has(id); }
     /** ダッシュ回避 */
     dodge(dx, dy) {
         if (this.dashTimer > 0 || this.dashCooldown > 0) return false;
@@ -204,8 +212,10 @@ export class Player {
             this.comboCount = 0;
         }
         let cdMult = this.skillAtkSpdMult;
+        if (this.hasSkill('sw_combo')) cdMult *= 0.8; // 連撃: コンボ速度+20%
         if (style === 'combo3' && this.comboCount === 2) cdMult *= 1.3;
         if (this.weapon.type === 'ranged') cdMult *= this.skillBowCdMult;
+        if (this.hasSkill('ar_rapid') && this.weapon.type === 'ranged') cdMult *= 0.7; // 速射
         this.attackCooldown = this.weapon.cooldown * cdMult;
         // Frost Blade: 自動2連撃（0.2秒後に2撃目フラグ）
         if (style === 'frost') this.frostSecondHit = 200;
@@ -215,7 +225,10 @@ export class Player {
     /** 現在のコンボ倍率を計算 */
     getComboMultiplier() {
         const s = this.weapon.style;
-        if (s === 'combo3') return [1.0, 1.2, 1.8][this.comboCount] || 1.0;
+        if (s === 'combo3') {
+            const base = [1.0, 1.2, 1.8][this.comboCount] || 1.0;
+            return (this.comboCount === 2 && this.hasSkill('sw_frenzy')) ? 2.5 : base;
+        }
         if (s === 'poison') return 1.0; // 各段固定
         if (s === 'charge' && this.chargeReady) return 80 / Math.max(1, this.weapon.damage); // チャージ時は80dmg相当
         return 1.0;
@@ -256,7 +269,8 @@ export class Player {
         if (this.invincibleTimer > 0) return 'hit';
         // パリィ判定
         if (this.blocking && this.parryWindow > 0) {
-            this.parryBonus = 1000; // 1秒間カウンターボーナス
+            this.parryBonus = 1000;
+            if (this.hasSkill('tk_counter')) this.parryBonus = 2000; // 反撃: カウンター延長
             this.parryCooldown = 500;
             this.invincibleTimer = 300;
             Sound.playHit();
@@ -266,7 +280,10 @@ export class Player {
         let blockMult = 1.0;
         if (this.blocking) blockMult = 0.4;
         const armorMult = this.armor ? this.armor.damageMultiplier : 1.0;
-        const finalDmg = Math.max(1, Math.floor(amount * armorMult * this.skillDefMult * blockMult));
+        let treeDef = 1.0;
+        if (this.hasSkill('tk_wall')) treeDef *= 0.85;   // 鉄壁
+        if (this.hasSkill('tk_grit') && this.hp < this.maxHp * 0.3) treeDef *= 0.7; // 不屈
+        const finalDmg = Math.max(1, Math.floor(amount * armorMult * this.skillDefMult * blockMult * treeDef));
         this.hp = Math.max(0, this.hp - finalDmg);
         this.invincibleTimer = this.invincibleDuration;
         Sound.playDamage();

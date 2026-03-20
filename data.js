@@ -64,22 +64,53 @@ export const SUB_QUESTS = [
     { id: 'parryMaster',name: 'パリィマスター', desc: '3回以上パリィ成功', rewardType: 'coreDrop', rewardVal: 1 },
 ];
 
-// EXP・レベルアップ定数
-export const EXP_TABLE = [0, 200, 500, 1000, 2000]; // Lv1→2, 2→3, ...
-export const MONSTER_EXP = { 'Forest Drake': 100, 'Ice Wolf': 80, 'Giant Drake': 500 };
-export const MAX_LEVEL = 5;
+// EXP・レベルアップ定数（Lv10まで）
+export const EXP_TABLE = [200, 500, 1000, 2000, 3500, 5000, 7000, 9500, 12000];
+export const MONSTER_EXP = { 'Forest Drake': 100, 'Ice Wolf': 80, 'Giant Drake': 500, 'Elder Drake': 1000 };
+export const MAX_LEVEL = 10;
 
-// スキル定義
+// 旧スキル定義（レベルアップ時3択用・互換）
 export const SKILLS = [
-    { id: 'powerSword', name: '剛剣',   desc: '近距離武器ダメージ+20%',  apply: (p) => { p.skillMeleeMult *= 1.2; } },
-    { id: 'rapidFire',  name: '速射',   desc: '弓のクールダウン-30%',    apply: (p) => { p.skillBowCdMult *= 0.7; } },
-    { id: 'ironWall',   name: '鉄壁',   desc: '被ダメージ-15%',         apply: (p) => { p.skillDefMult *= 0.85; } },
-    { id: 'swiftWind',  name: '疾風',   desc: '移動速度+20%',           apply: (p) => { p.baseSpeed = Math.floor(p.baseSpeed * 1.2); p.speed = p.baseSpeed; } },
-    { id: 'heal',       name: '回復',   desc: 'HP最大値+30・即時回復30', apply: (p) => { p.maxHp += 30; p.hp = Math.min(p.maxHp, p.hp + 30); } },
-    { id: 'flurry',     name: '連撃',   desc: '攻撃速度+25%',           apply: (p) => { p.skillAtkSpdMult *= 0.75; } },
-    { id: 'mining',     name: '採掘',   desc: '素材ドロップ数+1',        apply: (p) => { p.skillExtraDrop++; } },
-    { id: 'insight',    name: '看破',   desc: 'モンスターHP数値表示',     apply: (p) => { p.skillShowHpNum = true; } },
+    { id: 'heal',    name: '回復', desc: 'HP最大値+30・即時回復30', apply: (p) => { p.maxHp+=30; p.hp=Math.min(p.maxHp,p.hp+30); } },
+    { id: 'mining',  name: '採掘', desc: '素材ドロップ数+1',       apply: (p) => { p.skillExtraDrop++; } },
+    { id: 'insight', name: '看破', desc: 'モンスターHP数値表示',    apply: (p) => { p.skillShowHpNum=true; } },
 ];
+
+// スキルツリー定義（4系統 × 5レベル + 共通2つ）
+export const SKILL_TREE = {
+    common: [
+        { id: 'robust',    name: '剛健', desc: '最大HP+50',         tier: 0, requires: [] },
+        { id: 'training',  name: '武練', desc: '全武器ダメージ+10%', tier: 0, requires: [] },
+    ],
+    swordsman: { name: '剣士', color: '#cc4444', skills: [
+        { id: 'sw_combo',  name: '連撃', desc: 'コンボ攻撃速度+20%',            tier: 1, requires: [] },
+        { id: 'sw_power',  name: '剛剣', desc: '近距離ダメージ+25%',            tier: 2, requires: ['sw_combo'] },
+        { id: 'sw_frenzy', name: '乱舞', desc: '3段目ダメージ×2.5',             tier: 3, requires: ['sw_power'] },
+        { id: 'sw_iai',    name: '居合', desc: 'ダッシュ回避直後の攻撃+50%',     tier: 4, requires: ['sw_frenzy'] },
+        { id: 'sw_king',   name: '覇王', desc: '必殺技ゲージ速度+50%・必殺技+30%', tier: 5, requires: ['sw_iai'] },
+    ]},
+    tank: { name: 'タンク', color: '#4488cc', skills: [
+        { id: 'tk_wall',   name: '鉄壁', desc: '被ダメージ-15%',                tier: 1, requires: [] },
+        { id: 'tk_shield', name: '盾術', desc: 'パリィスタン 1秒→2.5秒',        tier: 2, requires: ['tk_wall'] },
+        { id: 'tk_counter',name: '反撃', desc: 'パリィ後カウンター+100%',        tier: 3, requires: ['tk_shield'] },
+        { id: 'tk_grit',   name: '不屈', desc: 'HP30%以下で被ダメ-30%・攻撃+20%', tier: 4, requires: ['tk_counter'] },
+        { id: 'tk_guard',  name: '守護神', desc: '仲間のダメージを肩代わり',      tier: 5, requires: ['tk_grit'] },
+    ]},
+    archer: { name: '弓射手', color: '#44aa44', skills: [
+        { id: 'ar_rapid',  name: '速射',   desc: '弓クールダウン-30%',          tier: 1, requires: [] },
+        { id: 'ar_pierce', name: '貫通',   desc: '矢が敵を貫通',               tier: 2, requires: ['ar_rapid'] },
+        { id: 'ar_double', name: '連矢',   desc: '通常射撃が2本同時発射',       tier: 3, requires: ['ar_pierce'] },
+        { id: 'ar_snipe',  name: '狙撃',   desc: 'チャージ射撃+80%・弱点×3.0', tier: 4, requires: ['ar_double'] },
+        { id: 'ar_storm',  name: '矢嵐',   desc: '必殺技の矢 10本→25本',       tier: 5, requires: ['ar_snipe'] },
+    ]},
+    mage: { name: '魔法', color: '#aa44cc', skills: [
+        { id: 'mg_element', name: '属性強化', desc: '氷・毒属性ダメージ+30%',     tier: 1, requires: [] },
+        { id: 'mg_freeze',  name: '凍結延長', desc: '凍結時間 2秒→5秒',           tier: 2, requires: ['mg_element'] },
+        { id: 'mg_spread',  name: '毒拡散',   desc: '毒が周囲の敵にも伝染',       tier: 3, requires: ['mg_freeze'] },
+        { id: 'mg_charge',  name: '魔力充填', desc: '必殺技ゲージ自動回復',        tier: 4, requires: ['mg_spread'] },
+        { id: 'mg_awaken',  name: '魔王覚醒', desc: '必殺技中無敵+全属性発動',     tier: 5, requires: ['mg_charge'] },
+    ]},
+};
 
 export const DROP_TABLES = {
     forestDrake: [
