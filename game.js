@@ -799,7 +799,7 @@ class Game {
             const cx=this.player.x+this.player.width/2, cy=this.player.y+this.player.height/2;
             if (wasReady) {
                 this.player.attackCooldown = this.player.weapon.cooldown * this.player.skillAtkSpdMult * this.player.skillBowCdMult;
-                const dmg = 25 + this.player.bonusDamage;
+                const dmg = 15 + this.player.bonusDamage;
                 const dir = this.player.facing;
                 // 中央 + 左右15度
                 this.arrows.push(new Arrow(cx,cy,dir,dmg));
@@ -850,7 +850,7 @@ class Game {
         if (this.player.parryBonus > 0) dmg = Math.floor(dmg * 1.3);
         // ハンマー部位破壊ボーナス
         const style = this.player.weapon.style;
-        const partDmgMult = style === 'hammer' ? 1.5 : 1.0;
+        const partDmgMult = style === 'hammer' ? 1.3 : 1.0;
         const hx = monster.x+monster.width/2, hy = monster.y+monster.height/2;
         // 弱点ゾーン判定（プレイヤー位置ベース）
         const px = this.player.x + this.player.width/2, py = this.player.y + this.player.height/2;

@@ -260,10 +260,10 @@ export class Weapon {
 export const WEAPONS = {
     basicSword:  new Weapon('Basic Sword',  15, 45, 350, 3, 'melee', 'combo3', '3段コンボ'),
     ironSword:   new Weapon('Iron Sword',   30, 55, 500, 5, 'melee', 'charge', 'チャージ攻撃'),
-    hunterBow:   new Weapon('Hunter Bow',   20, 300, 500, 0, 'ranged','bow',   '長押しで3連矢'),
-    frostBlade:  new Weapon('Frost Blade',  35, 50, 300, 4, 'melee', 'frost',  '2連撃・凍結'),
-    warHammer:   new Weapon('War Hammer',  120, 55,2000, 8, 'melee', 'hammer', '超重撃・部位+50%'),
-    poisonDagger:new Weapon('Poison Dagger',18, 35, 180, 1, 'melee', 'poison', '4段コンボ・毒'),
+    hunterBow:   new Weapon('Hunter Bow',   12, 300, 500, 0, 'ranged','bow',   '長押しで3連矢'),
+    frostBlade:  new Weapon('Frost Blade',  20, 50, 300, 4, 'melee', 'frost',  '2連撃・凍結'),
+    warHammer:   new Weapon('War Hammer',   70, 55,2000, 8, 'melee', 'hammer', '超重撃・部位+30%'),
+    poisonDagger:new Weapon('Poison Dagger',12, 35, 180, 1, 'melee', 'poison', '4段コンボ・毒'),
 };
 
 export class Armor {

@@ -52,7 +52,7 @@ export class Monster {
         // 凍結システム（Frost Blade用）
         this.frostCount = 0;      // 凍結カウンター（3でフリーズ）
         this.frozenTimer = 0;     // 凍結中タイマー(ms)
-        this.frozenDmgMult = 1.2; // 凍結中の被ダメ倍率
+        this.frozenDmgMult = 1.1; // 凍結中の被ダメ倍率
         // 毒システム（Poison Dagger用）
         this.poisonTimer = 0;
         this.poisonTickTimer = 0;
@@ -136,10 +136,10 @@ export class Monster {
             this.poisonTickTimer -= dt * 1000;
             if (this.poisonTickTimer <= 0) {
                 this.poisonTickTimer = 1000;
-                this.hp = Math.max(0, this.hp - 10);
+                this.hp = Math.max(0, this.hp - 6);
                 this.hitFlashTimer = 80;
                 if (game) game.damageNumbers.push(new DamageNumber(
-                    this.x+this.width/2, this.y-10, 10, '#44cc44', 'POISON'));
+                    this.x+this.width/2, this.y-10, 6, '#44cc44', 'POISON'));
                 if (this.hp <= 0) { this.alive = false; this.state = 'dead'; return; }
             }
         }
