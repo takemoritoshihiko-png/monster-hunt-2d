@@ -743,8 +743,10 @@ class Game {
         const style = this.player.weapon.style;
         const partDmgMult = style === 'hammer' ? 1.5 : 1.0;
         const hx = monster.x+monster.width/2, hy = monster.y+monster.height/2;
-        // 弱点部位倍率
-        const { mult: spotMult, label: spotLabel } = monster.getWeakSpotMult(hx, hy);
+        // 弱点ゾーン判定（プレイヤー位置ベース）
+        const px = this.player.x + this.player.width/2, py = this.player.y + this.player.height/2;
+        const { zone: hitZone, mult: spotMult, label: spotLabel } = monster.getHitZone(px, py);
+        console.log(`Hit zone: ${hitZone} (${spotLabel || 'normal'}) x${spotMult}`);
         dmg = Math.floor(dmg * partDmgMult * spotMult);
         const { partBroken } = monster.takeDamage(dmg, (dx/dist)*kb*comboMult, (dy/dist)*kb*comboMult, hx, hy);
         // 必殺技ゲージ加算

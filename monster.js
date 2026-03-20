@@ -67,42 +67,56 @@ export class Monster {
         // 巡回行動
         this.patrolTarget = { x: this.spawnX, y: this.spawnY };
         this.patrolTimer = 0;
-        // 弱点部位マップ { zone: { yMin, yMax, xMin, xMax (比率), mult, label } }
-        this.weakSpots = this._initWeakSpots();
+        // 弱点ゾーン定義
+        this.weakZones = this._initWeakZones();
+        this.hardZones = this._initHardZones();
         // 攻撃予備動作
-        this.telegraphTimer = 0;   // 予備動作中の残り時間(ms)
+        this.telegraphTimer = 0;
         this.telegraphing = false;
     }
-    _initWeakSpots() {
+    _initWeakZones() {
         const n = this.name;
-        if (n === 'Forest Drake' || n === 'Elder Drake') return [
-            { yMin: 0, yMax: 0.33, xMin: 0, xMax: 1, mult: 2.0, label: 'WEAK!' },    // 頭
-            { yMin: 0.33, yMax: 0.66, xMin: 0.2, xMax: 0.8, mult: 2.0, label: 'WEAK!' }, // 腹
-            { yMin: 0.66, yMax: 1, xMin: 0, xMax: 1, mult: 0.5, label: 'HARD' },     // 硬い
-        ];
-        if (n === 'Ice Wolf') return [
-            { yMin: 0.66, yMax: 1, xMin: 0, xMax: 1, mult: 2.0, label: 'WEAK!' },    // 脚
-            { yMin: 0, yMax: 0.5, xMin: 0, xMax: 1, mult: 2.0, label: 'WEAK!' },     // 背中
-        ];
-        if (n === 'Giant Drake') return [
-            { yMin: 0, yMax: 0.25, xMin: 0, xMax: 1, mult: 2.0, label: 'WEAK!' },    // 頭
-            { yMin: 0.2, yMax: 0.8, xMin: 0, xMax: 0.15, mult: 2.0, label: 'WEAK!' }, // 左翼
-            { yMin: 0.2, yMax: 0.8, xMin: 0.85, xMax: 1, mult: 2.0, label: 'WEAK!' }, // 右翼
-            { yMin: 0.3, yMax: 0.7, xMin: 0.3, xMax: 0.7, mult: 0.5, label: 'HARD' }, // 胴体硬い
-        ];
+        if (n === 'Forest Drake' || n === 'Elder Drake') return ['head', 'body'];
+        if (n === 'Ice Wolf') return ['legs', 'side'];
+        if (n === 'Giant Drake') return ['head', 'side'];
         return [];
     }
-    /** ヒット座標から弱点倍率を返す */
-    getWeakSpotMult(hitX, hitY) {
-        if (this.weakSpots.length === 0) return { mult: 1.0, label: '' };
-        const relX = (hitX - this.x) / this.width;
-        const relY = (hitY - this.y) / this.height;
-        for (const ws of this.weakSpots) {
-            if (relY >= ws.yMin && relY <= ws.yMax && relX >= ws.xMin && relX <= ws.xMax) {
-                return { mult: ws.mult, label: ws.label };
-            }
+    _initHardZones() {
+        const n = this.name;
+        if (n === 'Forest Drake' || n === 'Elder Drake') return ['legs'];
+        if (n === 'Giant Drake') return ['body'];
+        return [];
+    }
+    /**
+     * プレイヤー位置からヒットゾーンを判定
+     * @param {number} px - プレイヤーX
+     * @param {number} py - プレイヤーY
+     * @returns {{ zone: string, mult: number, label: string }}
+     */
+    getHitZone(px, py) {
+        const mcx = this.x + this.width / 2;
+        const mcy = this.y + this.height / 2;
+        const dx = px - mcx;
+        const dy = py - mcy;
+
+        let zone;
+        if (dy < -this.height * 0.2) {
+            zone = 'head';
+        } else if (dy > this.height * 0.2) {
+            zone = 'legs';
+        } else if (Math.abs(dx) > this.width * 0.3) {
+            zone = 'side';
+        } else {
+            zone = 'body';
         }
-        return { mult: 1.0, label: '' };
+
+        if (this.weakZones.includes(zone)) {
+            return { zone, mult: 2.0, label: 'WEAK!' };
+        }
+        if (this.hardZones.includes(zone)) {
+            return { zone, mult: 0.5, label: 'HARD' };
+        }
+        return { zone, mult: 1.0, label: '' };
     }
     update(dt, player, game) {
         if (!this.alive) return;
