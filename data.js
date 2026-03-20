@@ -10,6 +10,37 @@ export const MATERIALS = {
     drakeHeadScale: { id: 'drakeHeadScale', name: 'Drake Head Scale', color: '#55aa77', description: '頭部の鱗' },
     drakeTail:      { id: 'drakeTail',      name: 'Drake Tail',      color: '#aa7744', description: 'ドレイクの尻尾' },
     elderScale:     { id: 'elderScale',     name: 'Elder Scale',     color: '#aa44ff', description: '古龍の鱗' },
+    drakeFragment:  { id: 'drakeFragment',  name: 'Drake Fragment',  color: '#ff88cc', description: 'ドレイクの欠片' },
+    wolfFragment:   { id: 'wolfFragment',   name: 'Wolf Fragment',   color: '#88eeff', description: '狼の欠片' },
+    coreFragment:   { id: 'coreFragment',   name: 'Core Fragment',   color: '#ffaa44', description: '核の欠片' },
+};
+
+// 仲間モンスタータイプ定義
+export const COMPANION_TYPES = {
+    forest_drake:     { name: 'Forest Drake',     color: '#44aa44', hpMult: 1.2, atkMult: 1.0, atkCD: 1200 },
+    ice_wolf:         { name: 'Ice Wolf',         color: '#66bbee', hpMult: 0.8, atkMult: 1.3, atkCD: 800 },
+    giant_drake_mini: { name: 'Giant Drake Mini', color: '#aa4422', hpMult: 1.5, atkMult: 1.5, atkCD: 2000 },
+};
+
+// ボックスレシピ
+export const BOX_RECIPES = [
+    { id: 'normalBox', name: 'Normal Box', rarity: 'normal', frameColor: '#ffffff',
+      materials: [{ materialId: 'drakeScale', count: 5 }, { materialId: 'wolfFragment', count: 1 }],
+      rates: { forest_drake: 0.70, ice_wolf: 0.25, giant_drake_mini: 0.05 } },
+    { id: 'rareBox', name: 'Rare Box', rarity: 'rare', frameColor: '#4488ff',
+      materials: [{ materialId: 'drakeCore', count: 2 }, { materialId: 'drakeFragment', count: 2 }],
+      rates: { forest_drake: 0.30, ice_wolf: 0.45, giant_drake_mini: 0.25 } },
+    { id: 'srBox', name: 'SR Box', rarity: 'sr', frameColor: '#ffcc00',
+      materials: [{ materialId: 'elderScale', count: 1 }, { materialId: 'drakeCore', count: 3 }],
+      rates: { forest_drake: 0.10, ice_wolf: 0.30, giant_drake_mini: 0.60 } },
+];
+
+// フラグメントドロップ定義（モンスター名→素材ID）
+export const FRAGMENT_DROPS = {
+    'Forest Drake': 'drakeFragment',
+    'Ice Wolf': 'wolfFragment',
+    'Giant Drake': 'coreFragment',
+    'Elder Drake': 'coreFragment',
 };
 
 // アップグレード定義（武器ID→レベル別コスト）

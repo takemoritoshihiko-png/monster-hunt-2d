@@ -2,12 +2,13 @@
 // MONSTER HUNT 2D - Phase 5
 // フィールド改善・エフェクト・コンボ・UI仕上げ
 // ========================================
-import { MATERIALS, UPGRADE_COSTS, UPGRADE_DMG_MULT, ARMOR_UPGRADE_MULT, SUB_QUESTS, EXP_TABLE, MONSTER_EXP, MAX_LEVEL, SKILLS, DROP_TABLES, WORLD_W, WORLD_H, AREAS, TREES, TREE_TRUNK_R, TREE_CANOPY_R, TREE_COLLISION_R, QUESTS, Weapon, WEAPONS, Armor, ARMORS, RECIPES } from './data.js';
+import { MATERIALS, UPGRADE_COSTS, UPGRADE_DMG_MULT, ARMOR_UPGRADE_MULT, SUB_QUESTS, EXP_TABLE, MONSTER_EXP, MAX_LEVEL, SKILLS, DROP_TABLES, WORLD_W, WORLD_H, AREAS, TREES, TREE_TRUNK_R, TREE_CANOPY_R, TREE_COLLISION_R, QUESTS, Weapon, WEAPONS, Armor, ARMORS, RECIPES, FRAGMENT_DROPS, BOX_RECIPES, COMPANION_TYPES } from './data.js';
 import { SeededRandom, Particle, DamageNumber, SoundManager, Sound, roundRect } from './utils.js';
 import { DroppedItem, Arrow } from './weapon.js';
 import { Inventory } from './inventory.js';
 import { Player } from './player.js';
 import { Monster } from './monster.js';
+import { Companion } from './companion.js';
 
 // ========================================
 // ゲームメインクラス
@@ -37,6 +38,11 @@ class Game {
         // クラフト画面タブ
         this.craftTab = 0; // 0=CRAFT, 1=UPGRADE
         this.upgradeCursor = 0;
+        // ガチャ演出
+        this.gachaActive = false;
+        this.gachaTimer = 0;
+        this.gachaResult = null;    // Companion
+        this.gachaFrameColor = '#fff';
         // クラフトアニメーション
         this.craftAnimTimer = 0;     // アニメ進行(ms)
         this.craftAnimName = '';     // クラフトした武器名
@@ -356,6 +362,14 @@ class Game {
         this.currentQuest = quest;
         this.player = new Player(WORLD_W/2-16, WORLD_H/2+200, this.inventory);
         this.applyLoadedStats(this.player);
+        // 仲間の配置
+        this.activeCompanion = null;
+        if (this.inventory.activeCompanion) {
+            const c = this.inventory.activeCompanion;
+            c.x = this.player.x + 50; c.y = this.player.y + 30;
+            c.hp = c.maxHp; c.alive = true;
+            this.activeCompanion = c;
+        }
         this.monsters = quest.monsters.map(m=>new Monster(m.name,m.x,m.y,m.config));
         this.droppedItems=[]; this.arrows=[]; this.particles=[]; this.iceBreaths=[]; this.damageNumbers=[];
         this.questSuccess=false; this.shakeTimer=0; this.resultAnimTimer=0;
@@ -471,11 +485,16 @@ class Game {
                 return;
             }
             if (this.state==='craft') {
-                if (key==='tab'||key==='e') { this.craftTab=1-this.craftTab; this.upgradeCursor=0; return; }
+                if (key==='tab'||key==='e') { this.craftTab=(this.craftTab+1)%3; this.upgradeCursor=0; this.craftCursor=0; return; }
                 if (this.craftTab===0) {
                     if (key==='arrowup'||key==='w') this.craftCursor=Math.max(0,this.craftCursor-1);
                     else if (key==='arrowdown'||key==='s') this.craftCursor=Math.min(RECIPES.length-1,this.craftCursor+1);
                     else if (key==='enter'||key==='z') this.executeCraft();
+                } else if (this.craftTab===2) {
+                    // BOXタブ
+                    if (key==='arrowup'||key==='w') this.craftCursor=Math.max(0,this.craftCursor-1);
+                    else if (key==='arrowdown'||key==='s') this.craftCursor=Math.min(BOX_RECIPES.length-1,this.craftCursor+1);
+                    else if (key==='enter'||key==='z') this.openBox();
                 } else {
                     const items=[...this.inventory.weapons.filter(w=>w.name!=='Basic Sword'),...this.inventory.armors];
                     if (key==='arrowup'||key==='w') this.upgradeCursor=Math.max(0,this.upgradeCursor-1);
@@ -559,6 +578,19 @@ class Game {
         }
         if (success) { this.craftMessage = `Upgraded to ${item.getDisplayName ? item.getDisplayName() : item.name}+${item.upgradeLevel}!`; this.craftMessageTimer = 2000; Sound.playLevelUp(); }
         else { this.craftMessage = 'Not enough materials!'; this.craftMessageTimer = 1500; }
+    }
+
+    openBox() {
+        const box = BOX_RECIPES[this.craftCursor];
+        if (!box) return;
+        const companion = this.inventory.openBox(box);
+        if (!companion) { this.craftMessage='Not enough materials!'; this.craftMessageTimer=1500; return; }
+        // ガチャ演出開始
+        this.gachaActive = true;
+        this.gachaTimer = 3000; // 3秒演出
+        this.gachaResult = companion;
+        this.gachaFrameColor = box.frameColor;
+        Sound.playLevelUp();
     }
 
     executeCraft() {
@@ -823,6 +855,19 @@ class Game {
             for (const d of drops) d.count += this.player.skillExtraDrop;
         }
         this.droppedItems.push(...drops);
+        // フラグメントレアドロップ（1%）
+        const fragId = FRAGMENT_DROPS[monster.name];
+        if (fragId && Math.random() < 0.01) {
+            this.inventory.addMaterial(fragId, 1);
+            const cx = monster.x+monster.width/2, cy = monster.y+monster.height/2;
+            this.damageNumbers.push(new DamageNumber(cx, cy-40, 0, '#ff88ff', 'RARE DROP!'));
+            // 虹色パーティクル
+            for (let i=0;i<12;i++) {
+                const a=Math.random()*Math.PI*2, sp=60+Math.random()*80;
+                const colors=['#ff4444','#ffaa00','#ffff00','#44ff44','#4488ff','#aa44ff'];
+                this.particles.push(new Particle(cx,cy,Math.cos(a)*sp,Math.sin(a)*sp-30,colors[i%6],800,3));
+            }
+        }
         // 討伐数カウント
         this.totalHunts++;
         try { localStorage.setItem('mh2d_totalHunts', String(this.totalHunts)); } catch(e){}
@@ -917,6 +962,7 @@ class Game {
         if (this.slowMoTimer>0) { this.slowMoTimer-=dt*1000; dt *= 0.3; } // スローモーション
         if (this.ultimateDisplayTimer>0) this.ultimateDisplayTimer-=dt*1000;
         if (this.craftAnimTimer>0) { this.craftAnimTimer-=dt*1000; if (this.craftAnimTimer<=0) this.craftAnimActive=false; }
+        if (this.gachaTimer>0) { this.gachaTimer-=dt*1000; if (this.gachaTimer<=0) this.gachaActive=false; }
 
         // ダメージ数値更新
         for (const dn of this.damageNumbers) dn.update(dt);
@@ -972,6 +1018,15 @@ class Game {
             this.state='gameover'; return;
         }
         this.player.update(dt, this.keys, WORLD_W, WORLD_H, TREES);
+        // 仲間更新
+        if (this.activeCompanion && this.activeCompanion.alive) {
+            const hitResult = this.activeCompanion.update(dt, this.player, this.monsters);
+            if (hitResult && hitResult.hit) {
+                this.damageNumbers.push(new DamageNumber(hitResult.target.x+hitResult.target.width/2, hitResult.target.y-10, hitResult.dmg, '#aaffaa', ''));
+                this.spawnHitParticles(hitResult.target.x+hitResult.target.width/2, hitResult.target.y+hitResult.target.height/2, 4, false);
+                if (!hitResult.target.alive) { Sound.playMonsterDie(); this.onMonsterDefeated(hitResult.target); }
+            }
+        }
         // カメラ追従
         this.camera.x = this.player.x + this.player.width/2 - this.W/2;
         this.camera.y = this.player.y + this.player.height/2 - this.H/2;
@@ -1082,6 +1137,49 @@ class Game {
             case 'gameover': this.drawField(ctx); this.drawGameOver(ctx); break;
             case 'result': this.drawField(ctx); this.drawQuestComplete(ctx); break;
         }
+        // ガチャ演出オーバーレイ
+        if (this.gachaActive && this.gachaResult) {
+            ctx.save(); ctx.globalAlpha = 1;
+            const gt = 3000 - this.gachaTimer;
+            const W2 = this.W, H2 = this.H;
+            // 暗転
+            ctx.fillStyle = `rgba(0,0,0,${Math.min(0.85, gt/500)})`;
+            ctx.fillRect(0, 0, W2, H2);
+            if (gt < 500) {
+                // ドキドキ
+            } else if (gt < 1500) {
+                // ???表示
+                ctx.fillStyle = '#fff'; ctx.font = 'bold 48px monospace'; ctx.textAlign = 'center';
+                const pulse = 1 + Math.sin(gt*0.01)*0.1;
+                ctx.save(); ctx.translate(W2/2, H2/2-20); ctx.scale(pulse, pulse);
+                ctx.fillText('???', 0, 0); ctx.restore();
+            } else if (gt < 2000) {
+                // 光って割れる
+                const p = (gt-1500)/500;
+                ctx.fillStyle = `rgba(255,255,200,${0.5*(1-p)})`;
+                ctx.beginPath(); ctx.arc(W2/2, H2/2, p*200, 0, Math.PI*2); ctx.fill();
+                // モンスターシルエット→色つき
+                ctx.globalAlpha = p;
+                ctx.fillStyle = this.gachaResult.color;
+                ctx.beginPath(); ctx.arc(W2/2, H2/2, 40, 0, Math.PI*2); ctx.fill();
+            } else {
+                // 結果表示
+                const a = Math.min(1, (gt-2000)/300);
+                ctx.globalAlpha = a;
+                // 枠
+                ctx.strokeStyle = this.gachaFrameColor; ctx.lineWidth = 4;
+                roundRect(ctx, W2/2-120, H2/2-80, 240, 160, 12); ctx.stroke();
+                // モンスター
+                ctx.fillStyle = this.gachaResult.color;
+                ctx.beginPath(); ctx.arc(W2/2, H2/2-20, 35, 0, Math.PI*2); ctx.fill();
+                // テキスト
+                ctx.fillStyle = '#fff'; ctx.font = 'bold 18px monospace'; ctx.textAlign = 'center';
+                ctx.fillText(`${this.gachaResult.name}`, W2/2, H2/2+40);
+                ctx.fillStyle = '#c8a800'; ctx.font = 'bold 14px monospace';
+                ctx.fillText('が仲間になった!', W2/2, H2/2+62);
+            }
+            ctx.restore();
+        }
         // セーブインジケーター（右上）
         if (this.saveIndicatorTimer > 0) {
             const a = Math.min(1, this.saveIndicatorTimer / 500);
@@ -1158,6 +1256,10 @@ class Game {
             ctx.restore();
         }
         if (this.player) { ctx.save(); this.player.draw(ctx, this.images.player); ctx.restore(); }
+        // 仲間描画
+        if (this.activeCompanion && this.activeCompanion.alive) {
+            ctx.save(); this.activeCompanion.draw(ctx); ctx.restore();
+        }
         // 氷の息
         for (const ib of this.iceBreaths) {
             if (!ib.alive) continue;
@@ -2117,9 +2219,9 @@ class Game {
         ctx.fillRect(10, 18, W-20, 38);
 
         // === タブ（インベントリと同スタイル） ===
-        const tabNames = ['CRAFT', 'UPGRADE'];
-        const tabW = Math.min(140, (W-60)/4);
-        for (let t = 0; t < 2; t++) {
+        const tabNames = ['CRAFT', 'UPGRADE', 'BOX'];
+        const tabW = Math.min(120, (W-80)/3);
+        for (let t = 0; t < 3; t++) {
             const tx = 20 + t * (tabW + 6);
             const sel = t === this.craftTab;
             ctx.fillStyle = sel ? '#2a2a38' : '#1a1a22';
@@ -2138,7 +2240,7 @@ class Game {
 
         // タイトルテキスト
         ctx.fillStyle = '#c8a800'; ctx.font = 'bold 22px monospace'; ctx.textAlign = 'center';
-        ctx.fillText(this.craftTab === 0 ? 'CRAFT' : 'UPGRADE', W/2, 43);
+        ctx.fillText(['CRAFT','UPGRADE','BOX'][this.craftTab], W/2, 43);
 
         const contentY = 65;
         const detailX = Math.floor(W * 0.62);
@@ -2191,6 +2293,74 @@ class Game {
                 if (items[this.upgradeCursor]) {
                     const it = items[this.upgradeCursor];
                     if (it instanceof Weapon) this._drawInvDetail(ctx,detailX,contentY,W-detailX-15,H-contentY-40,'weapon',it);
+                }
+            }
+        } else if (this.craftTab === 2) {
+            // === BOXタブ ===
+            this.craftCursor = Math.min(this.craftCursor, BOX_RECIPES.length-1);
+            let by = contentY;
+            for (let i = 0; i < BOX_RECIPES.length; i++) {
+                const box = BOX_RECIPES[i];
+                const sel = i === this.craftCursor;
+                const canOpen = this.inventory.canCraftBox(box);
+                ctx.fillStyle = sel ? 'rgba(200,168,0,0.12)' : (i%2===0 ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0)');
+                ctx.fillRect(20, by, listW, 70);
+                if (sel) { ctx.strokeStyle = box.frameColor; ctx.lineWidth = 2; ctx.strokeRect(20, by, listW, 70); }
+                // ボックスアイコン
+                ctx.fillStyle = box.frameColor; ctx.globalAlpha = 0.3;
+                roundRect(ctx, 28, by+10, 50, 50, 6); ctx.fill();
+                ctx.globalAlpha = 1; ctx.strokeStyle = box.frameColor; ctx.lineWidth = 2;
+                roundRect(ctx, 28, by+10, 50, 50, 6); ctx.stroke();
+                ctx.fillStyle = '#fff'; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
+                ctx.fillText('?', 53, by+42);
+                // 名前
+                ctx.fillStyle = sel ? box.frameColor : '#bbb';
+                ctx.font = 'bold 14px monospace'; ctx.textAlign = 'left';
+                ctx.fillText(box.name, 88, by+22);
+                // 排出率
+                ctx.fillStyle = '#777'; ctx.font = '9px monospace';
+                const rateStr = Object.entries(box.rates).map(([k,v])=>`${COMPANION_TYPES[k].name}:${Math.round(v*100)}%`).join(' / ');
+                ctx.fillText(rateStr, 88, by+38);
+                // 素材
+                let mx = 88; const my = by+55;
+                for (const req of box.materials) {
+                    const mat = MATERIALS[req.materialId];
+                    const ow = this.inventory.getMaterialCount(req.materialId);
+                    const en = ow >= req.count;
+                    this._drawMatIcon(ctx, req.materialId, mx+6, my-4, 5);
+                    mx += 14;
+                    ctx.fillStyle = en ? '#fff' : '#cc4444'; ctx.font = '10px monospace'; ctx.textAlign = 'left';
+                    ctx.fillText(`x${req.count}`, mx, my); mx += 30;
+                }
+                // OPENボタン
+                if (sel) {
+                    const bx = listW-65, by2 = by+23, bw = 65, bh = 24;
+                    ctx.fillStyle = canOpen ? '#886600' : '#222';
+                    roundRect(ctx, bx, by2, bw, bh, 4); ctx.fill();
+                    if (canOpen) { ctx.strokeStyle = box.frameColor; ctx.lineWidth = 1; roundRect(ctx, bx, by2, bw, bh, 4); ctx.stroke(); }
+                    ctx.fillStyle = canOpen ? '#fff' : '#555'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+                    ctx.fillText('OPEN', bx+bw/2, by2+16); ctx.textAlign = 'left';
+                }
+                by += 76;
+            }
+            // 右パネル: 所持仲間リスト
+            ctx.fillStyle = 'rgba(26,26,34,0.95)';
+            roundRect(ctx, detailX, contentY, W-detailX-15, H-contentY-40, 8); ctx.fill();
+            ctx.strokeStyle = '#c8a800'; ctx.lineWidth = 1;
+            roundRect(ctx, detailX, contentY, W-detailX-15, H-contentY-40, 8); ctx.stroke();
+            ctx.fillStyle = '#c8a800'; ctx.font = 'bold 14px monospace'; ctx.textAlign = 'center';
+            ctx.fillText('Companions', detailX+(W-detailX-15)/2, contentY+25);
+            let cy2 = contentY + 40;
+            if (this.inventory.companions.length === 0) {
+                ctx.fillStyle = '#555'; ctx.font = '12px monospace';
+                ctx.fillText('No companions yet', detailX+(W-detailX-15)/2, cy2+20);
+            } else {
+                for (const c of this.inventory.companions) {
+                    const isActive = c === this.inventory.activeCompanion;
+                    ctx.fillStyle = c.color; ctx.beginPath(); ctx.arc(detailX+25, cy2+8, 8, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = isActive ? '#c8a800' : '#aaa'; ctx.font = '12px monospace'; ctx.textAlign = 'left';
+                    ctx.fillText(`${c.name} Lv${c.level}${isActive?' [ACTIVE]':''}`, detailX+40, cy2+12);
+                    cy2 += 22;
                 }
             }
         } else {

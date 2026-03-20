@@ -1,11 +1,14 @@
-import { Weapon, Armor, WEAPONS, ARMORS, UPGRADE_COSTS, UPGRADE_DMG_MULT, ARMOR_UPGRADE_MULT, MATERIALS } from './data.js';
+import { Weapon, Armor, WEAPONS, ARMORS, UPGRADE_COSTS, UPGRADE_DMG_MULT, ARMOR_UPGRADE_MULT, MATERIALS, BOX_RECIPES } from './data.js';
+import { Companion } from './companion.js';
 
 export class Inventory {
     constructor() {
         this.materials = {}; this.weapons = [WEAPONS.basicSword]; this.armors = [];
-        this.clearedQuests = new Set(); // クリア済みクエストID
-        this.bestTimes = {};            // クエストID→ベストタイム(秒)
-        this.title = '';                // 称号
+        this.companions = [];           // 仲間モンスターリスト
+        this.activeCompanion = null;    // 出撃中の仲間
+        this.clearedQuests = new Set();
+        this.bestTimes = {};
+        this.title = '';
     }
     addMaterial(id, n) { if (!this.materials[id]) this.materials[id]=0; this.materials[id]+=n; }
     getMaterialCount(id) { return this.materials[id]||0; }
@@ -86,6 +89,8 @@ export class Inventory {
             clearedQuests: [...this.clearedQuests],
             bestTimes: { ...this.bestTimes },
             title: this.title,
+            companions: this.companions.map(c => c.serialize()),
+            activeCompanionIdx: this.activeCompanion ? this.companions.indexOf(this.activeCompanion) : -1,
         };
     }
     /** セーブデータから復元 */
@@ -111,5 +116,30 @@ export class Inventory {
         this.clearedQuests = new Set(data.clearedQuests || []);
         this.bestTimes = data.bestTimes || {};
         this.title = data.title || '';
+        // 仲間復元
+        this.companions = (data.companions || []).map(c => Companion.deserialize(c));
+        if (data.activeCompanionIdx >= 0 && data.activeCompanionIdx < this.companions.length) {
+            this.activeCompanion = this.companions[data.activeCompanionIdx];
+        }
+    }
+    /** ボックスをクラフトできるか */
+    canCraftBox(boxRecipe) {
+        return boxRecipe.materials.every(m => this.getMaterialCount(m.materialId) >= m.count);
+    }
+    /** ボックスを開封して仲間を獲得 */
+    openBox(boxRecipe) {
+        if (!this.canCraftBox(boxRecipe)) return null;
+        for (const m of boxRecipe.materials) this.consumeMaterial(m.materialId, m.count);
+        // 確率抽選
+        const roll = Math.random();
+        let cumulative = 0;
+        let resultType = 'forest_drake';
+        for (const [type, rate] of Object.entries(boxRecipe.rates)) {
+            cumulative += rate;
+            if (roll < cumulative) { resultType = type; break; }
+        }
+        const companion = new Companion(resultType, 1);
+        this.companions.push(companion);
+        return companion;
     }
 }
